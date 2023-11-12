@@ -1,0 +1,253 @@
+# Model: wav2vec2 + DNN + CTC
+# Augmentation: SpecAugment
+# Authors: Titouan Parcollet 2021
+#          Mirco Ravanelli 2021
+#          Sangeet Sagar 2022
+# ################################
+
+# Seed needs to be set at top of yaml, before objects with parameters are made
+seed: 1004
+__set_seed: !apply:torch.manual_seed [!ref <seed>]
+#output_folder: !ref results/wav2vec2_ctc_de/<seed>
+output_folder: !ref /home/CVoice_hubert_ctc/result/hubert_ctc_en+de/<seed>
+test_wer_file: !ref <output_folder>/wer_test.txt
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+# URL for the LARGE Fairseq German wav2vec2 model.
+#wav2vec2_hub: facebook/wav2vec2-large-xlsr-53
+#wav2vec2_folder: !ref <save_folder>/wav2vec2_checkpoint
+
+# Path for the wav2vec2-large-xlsr-53 model.
+wav2vec2_hub: facebook/hubert-base-ls960
+# /data/pretrained/models--facebook--wav2vec2-large-xlsr-53
+wav2vec2_folder: !ref <save_folder>/hubert_checkpoint
+
+# Dataset prep parameters
+data_folder: /data/cv-corpus-15.0-2023-09-08/de #####################
+train_tsv_file: !ref <data_folder>/train.tsv
+dev_tsv_file: !ref <data_folder>/dev.tsv
+test_tsv_file: !ref <data_folder>/test.tsv
+accented_letters: False # will strip accent
+language: de ####################################
+train_csv: !ref <save_folder>/train.csv
+valid_csv: !ref <save_folder>/dev.csv
+test_csv: !ref <save_folder>/test.csv
+skip_prep: False
+
+
+# We remove utterance slonger than 10s in the train/dev/test sets as
+# longer sentences certainly correspond to "open microphones".
+avoid_if_longer_than: 10.0
+
+# Training parameters
+number_of_epochs: 50
+lr: 1.0
+lr_wav2vec: 0.0001
+sorting: descending #ascending # sort training data to speed up training and get better results.
+auto_mix_prec: False
+sample_rate: 16000
+ckpt_interval_minutes: 10 # save checkpoint every N min
+
+# With data_parallel batch_size is split into N jobs
+# With DDP batch_size is multiplied by N jobs
+## Must be 6 per GPU to fit 16GB of VRAM
+# Must be 8 per GPU to fit 32GB of VRAM
+batch_size: 32
+test_batch_size: 32
+dataloader_num_workers: 4
+test_num_workers: 4
+# grad_accumulation: 4
+pin_memory: True
+
+# DDP setup
+#distributed_launch: False # single node
+#data_parallel_backend: True # multi-GPU training over a single machine
+#distributed_backend: nccl
+#nproc_per_node: !ref <dataloader_num_workers> 
+#nnodes: 1 # single node multi-gpus setting
+
+# Enable colored progress-bar in tqdm
+#tqdm_colored_bar: True
+#tqdm_barcolor: {"train": "GREEN",
+#                "valid": "MAGENTA",
+#                "test": "CYAN",}
+
+
+dataloader_options:
+  batch_size: !ref <batch_size>
+  num_workers: !ref <dataloader_num_workers>
+  pin_memory: !ref <pin_memory>
+  shuffle: True ###########################################
+test_dataloader_options:
+  batch_size: !ref <test_batch_size>
+  num_workers: !ref <test_num_workers>
+  pin_memory: !ref <pin_memory>
+
+
+# BPE parameters
+token_type: char # ["unigram", "bpe", "char"] 
+character_coverage: 1.0
+
+# Model parameters
+# activation: !name:torch.nn.LeakyReLU
+#dnn_neurons: 1024 # large model
+dnn_neurons: 768 # base model
+wav2vec_output_dim: !ref <dnn_neurons>
+freeze_wav2vec: False # Z -> context vector C 로 인코딩하는 건 update 
+freeze_feature_extractor: True # CNN이 뱉는 feature extractor는 freeze
+dropout: 0.15
+warmup_steps: 25588 # batch32 # 64: 12794 # training data의 0.5 / batch_size
+                    # optimizer (adam..) 을 step() 하지 말고 기다려야할 step 수
+freeze_steps: 6397 # 총 step의 1/8
+
+
+# Outputs
+output_neurons: 32 # BPE size, index(blank/eos/bos) = 0 ############################
+
+# Be sure that the bos and eos index match with the BPEs ones
+#blank_index: 0
+#bos_index: 1
+#eos_index: 2
+
+# Functions and classes
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+  limit: !ref <number_of_epochs>
+
+augmentation: !new:speechbrain.lobes.augment.TimeDomainSpecAugment
+  sample_rate: !ref <sample_rate>
+  speeds: [95, 100, 105]
+
+enc: !new:speechbrain.nnet.containers.Sequential
+  input_shape: [null, null, !ref <wav2vec_output_dim>]
+  linear1: !name:speechbrain.nnet.linear.Linear
+    n_neurons: !ref <dnn_neurons>
+    bias: True
+  bn1: !name:speechbrain.nnet.normalization.BatchNorm1d
+  activation: !new:torch.nn.LeakyReLU
+  #########################################################
+  #drop: !new:torch.nn.Dropout
+  #  p: !ref <dropout>
+  #linear2: !name:speechbrain.nnet.linear.Linear
+  #  n_neurons: !ref <dnn_neurons>
+  #  bias: True
+  #bn2: !name:speechbrain.nnet.normalization.BatchNorm1d
+  #activation2: !new:torch.nn.LeakyReLU
+  #drop2: !new:torch.nn.Dropout
+  #  p: !ref <dropout>
+  #linear3: !name:speechbrain.nnet.linear.Linear
+  #  n_neurons: !ref <dnn_neurons>
+  #  bias: True
+  #bn3: !name:speechbrain.nnet.normalization.BatchNorm1d
+  #activation3: !new:torch.nn.LeakyReLU
+##############################################################
+wav2vec2: !new:speechbrain.lobes.models.huggingface_wav2vec.HuggingFaceWav2Vec2
+  source: !ref <wav2vec2_hub>
+  output_norm: True
+  freeze: !ref <freeze_wav2vec>
+  freeze_feature_extractor: !ref <freeze_feature_extractor>
+  save_path: !ref <wav2vec2_folder>
+
+
+# Decoding parameters
+# Be sure that the bos and eos index match with the BPEs ones
+blank_index: 0
+bos_index: 1
+eos_index: 2
+pad_index: 3
+unk_index: 4
+
+# 32_char.vocab
+# <unk> : 0
+# ▁ : -1.84225
+
+min_decode_ratio: 0.0
+max_decode_ratio: 1.0
+beam_size: 80
+eos_threshold: 1.5
+using_max_attn_shift: True
+max_attn_shift: 140
+# ctc_weight_decode: 0.0
+# temperature: 1.50
+
+
+#beam_searcher: !new:speechbrain.decoders.S2SBeamSearcher
+#  bos_index: !ref <bos_index>
+#  eos_index: !ref <eos_index>
+#  blank_index: !ref <blank_index>
+#  min_decode_ratio: !ref <min_decode_ratio>
+#  max_decode_ratio: !ref <max_decode_ratio>
+#  beam_size: !ref <beam_size>
+#  eos_threshold: !ref <eos_threshold>
+#  using_max_attn_shift: !ref <using_max_attn_shift>
+#  max_attn_shift: !ref <max_attn_shift>
+  #topk: (int) – The number of hypothesis to return. (default: 1)
+
+
+
+#####
+# Uncomment this block if you prefer to use a Fairseq pretrained model instead
+# of a HuggingFace one. Here, we provide an URL that is obtained from the
+# Fairseq github for the multilingual XLSR.
+#
+#wav2vec2_url: https://dl.fbaipublicfiles.com/fairseq/wav2vec/wav2vec_vox_960h_pl.pt
+#wav2vec2: !new:speechbrain.lobes.models.fairseq_wav2vec.FairseqWav2Vec2
+#    pretrained_path: !ref <wav2vec2_url>
+#    output_norm: True
+#    freeze: False
+#    save_path: !ref <save_folder>/wav2vec2_checkpoint/model.pt
+
+ctc_lin: !new:speechbrain.nnet.linear.Linear
+  input_size: !ref <dnn_neurons> # Size of the input tensor.
+  n_neurons: !ref <output_neurons> # number of output neurons
+
+log_softmax: !new:speechbrain.nnet.activations.Softmax
+  apply_log: True
+
+ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
+  blank_index: !ref <blank_index>
+
+modules:
+  wav2vec2: !ref <wav2vec2>
+  enc: !ref <enc>
+  ctc_lin: !ref <ctc_lin>
+
+model: !new:torch.nn.ModuleList
+  - [!ref <enc>, !ref <ctc_lin>]
+
+model_opt_class: !name:torch.optim.Adadelta
+  lr: !ref <lr>
+  rho: 0.95
+  eps: 1.e-8
+
+wav2vec_opt_class: !name:torch.optim.Adam
+  lr: !ref <lr_wav2vec>
+
+lr_annealing_model: !new:speechbrain.nnet.schedulers.NewBobScheduler
+  initial_value: !ref <lr>
+  improvement_threshold: 0.0025
+  annealing_factor: 0.8
+  patient: 0
+
+lr_annealing_wav2vec: !new:speechbrain.nnet.schedulers.NewBobScheduler
+  initial_value: !ref <lr_wav2vec>
+  improvement_threshold: 0.0025
+  annealing_factor: 0.9
+  patient: 0
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+  checkpoints_dir: !ref <save_folder>
+  recoverables:
+    wav2vec2: !ref <wav2vec2>
+    model: !ref <model>
+    scheduler_model: !ref <lr_annealing_model>
+    scheduler_wav2vec: !ref <lr_annealing_wav2vec>
+    counter: !ref <epoch_counter>
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+  save_file: !ref <train_log>
+
+error_rate_computer: !name:speechbrain.utils.metric_stats.ErrorRateStats
+
+cer_computer: !name:speechbrain.utils.metric_stats.ErrorRateStats
+  split_tokens: True
