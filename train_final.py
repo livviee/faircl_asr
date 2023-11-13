@@ -364,9 +364,9 @@ def dataio_prepare(hparams, tokenizer):
 
 if __name__ == "__main__":
 
-    wandb.init(project='Train en+de')
+    wandb.init(project='YOUR PROJECT NAME') # resume=True
     
-    wandb.run.name = "Third run"
+    wandb.run.name = "YOUR RUN NAME"
     wandb.run.save()
     
     # Load hyperparameters file with command-line overrides
