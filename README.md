@@ -8,7 +8,7 @@
 4. Make sure you have train.csv, test.csv, dev.csv in your save_folder in order to avoid data preprocessing
 5. Make sure hyperparameters in yaml file is well adjusted to your setting
 6. Check the availability of four GPUs
-7. Run the command: <pre>CUDA_VISIBLE_DEVICES=[],[],[],[] python3 train_final.py hparams/OF_YOUR_SETTING.yaml --data_parallel_backend --tqdm_colored_bar --grad_accumulation_factor 4<code>
+7. Run the command: `CUDA_VISIBLE_DEVICES=[],[],[],[] python3 train_final.py hparams/OF_YOUR_SETTING.yaml --data_parallel_backend --tqdm_colored_bar --grad_accumulation_factor 4`
    
 ## Hparams
 ### Train Settings
