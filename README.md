@@ -21,5 +21,5 @@
 
 ### What you should care / modify
 - You should change `!PLACEHOLDER` in regard to your own setting.
-- Check `output_folder` and `data_folder` is set for your setting.
+  - Set `output_folder` and `data_folder` to of your own corresponding directory.
 - You should have the preprocessed `train.csv`, `test.csv`, `dev.csv` in your `save_folder` before start training in order to avoid data_preprocessing
