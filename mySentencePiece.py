@@ -1,8 +1,3 @@
-"""Library for Byte-pair-encoding (BPE) tokenization.
-Authors
- * Abdelwahab Heba 2020
- * Loren Lugosch 2020
-"""
 
 import os.path
 import torch
