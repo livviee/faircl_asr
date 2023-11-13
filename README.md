@@ -1,4 +1,4 @@
-# Fair Continual Learning of ASR Project
+# Fair Continual Learning ASR Project
 
 
 ## How to run
