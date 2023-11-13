@@ -23,3 +23,8 @@
 - You should change `!PLACEHOLDER` in regard to your own setting.
   - Set `output_folder` and `data_folder` to of your own corresponding directory.
 - Preprocessed `train.csv`, `test.csv`, `dev.csv` should be in your `save_folder` before start training in order to avoid data_preprocessing
+
+
+## train_final.py
+### What you should modify
+- If you are going to use wandb, uncomment wandb command lines 
