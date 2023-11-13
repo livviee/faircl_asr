@@ -13,11 +13,11 @@
 `CUDA_VISIBLE_DEVICES=[],[],[],[] python3 train_final.py hparams/OF_YOUR_SETTING.yaml --data_parallel_backend --tqdm_colored_bar --grad_accumulation_factor 4`
    
 ## Hparams
-### Train Settings
+### Training Settings
 
-1. multi-lingual model : `1_train_en+de.yaml`
-2. fine-tuned model : first train en model with `2_train_en_first.yaml` and then fine-tune with `3_train_de_second.yaml`
-3. naive memory replay model : first train en model with `2_train_en_first.yaml` and then train with `4_train_de_second_with_naive_mem_replay.yaml`
+1. multi-lingual model : train with `1_train_en+de.yaml`
+2. fine-tuned model : first train en model with `2_train_en_first.yaml` and then fine-tune with de using `3_train_de_second.yaml`
+3. naive memory replay model : first train en model with `2_train_en_first.yaml` and then train it with de + 1_percent_of_en using `4_train_de_second_with_naive_mem_replay.yaml`
 
 ### What you should care / modify
 - You should change `!PLACEHOLDER` in regard to your own setting.
