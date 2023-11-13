@@ -1,27 +1,4 @@
 #!/usr/bin/env python3
-"""Recipe for training a sequence-to-sequence ASR system with CommonVoice.
-The system employs a wav2vec2 encoder and a CTC decoder.
-Decoding is performed with greedy decoding (will be extended to beam search).
-
-To run this recipe, do the following:
-> python train_with_wav2vec2.py hparams/train_with_wav2vec2.yaml
-
-With the default hyperparameters, the system employs a pretrained wav2vec2 encoder.
-The wav2vec2 model is pretrained following the model given in the hprams file.
-It may be dependent on the language.
-
-The neural network is trained with CTC on sub-word units estimated with
-Byte Pairwise Encoding (BPE).
-
-The experiment file is flexible enough to support a large variety of
-different systems. By properly changing the parameter files, you can try
-different encoders, decoders, tokens (e.g, characters instead of BPE),
-training languages (all CommonVoice languages), and many
-other possible variations.
-
-Authors
- * Titouan Parcollet 2021
-"""
 
 import sys
 import torch
