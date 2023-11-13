@@ -140,7 +140,7 @@ class ASR(sb.core.Brain):
 
             loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
 
-            wandb.log({"Training loss": loss})
+            #wandb.log({"Training loss": loss})
                 
             with self.no_sync(not should_step):
                 (loss / self.grad_accumulation_factor).backward()
@@ -194,7 +194,7 @@ class ASR(sb.core.Brain):
                     self.model_optimizer, new_lr
                 )
             
-            wandb.log({"Learning rate": old_lr})
+            #wandb.log({"Learning rate": old_lr})
             
             #self.hparams.train_logger.log_stats(
             #    stats_meta={
@@ -364,10 +364,10 @@ def dataio_prepare(hparams, tokenizer):
 
 if __name__ == "__main__":
 
-    wandb.init(project='YOUR PROJECT NAME') # resume=True
+    #wandb.init(project='YOUR PROJECT NAME') # resume=True
     
-    wandb.run.name = "YOUR RUN NAME"
-    wandb.run.save()
+    #wandb.run.name = "YOUR RUN NAME"
+    #wandb.run.save()
     
     # Load hyperparameters file with command-line overrides
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
@@ -384,7 +384,7 @@ if __name__ == "__main__":
         "num_workers": hparams["num_workers"]
     }
     
-    wandb.config.update(args)
+    #wandb.config.update(args)
    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.empty_cache()
