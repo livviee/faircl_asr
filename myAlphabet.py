@@ -1,4 +1,4 @@
-# Copyright 2021-present Kensho Technologies, LLC.
+
 from __future__ import division
 
 import json
