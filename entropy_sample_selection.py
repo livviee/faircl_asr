@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
+"""
+Implementation of "Entropy-based Sample Selection for Online Continual Learning (2021)"
+https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9287846
 
+In order to find the minimum distance feature,
+cosine similarity of features was used instead of measuring direct distances.
+
+"""
 import sys
 import torch
 import logging
