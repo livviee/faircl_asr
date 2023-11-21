@@ -34,9 +34,18 @@
 \
 ## Sample Selection Methods for Memory Replay
 ### Entropy-based Sample Selection
-- Implementation of `Entropy-based Sample Selection for Online Continual Learning (2021)`
+- Implementation of Entropy-based Sample Selection inspired by: `Entropy-based Sample Selection for Online Continual Learning (2021)`
    (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9287846)
 - `entropy_sample_selection.py` : replaced measuring direct distances of features with measuring cosine similarities.
 - `entropy_sample_selection2.py` : faster version of above by removing and adding samples in bulk.
+- corresponding hparam file : `5_entropy_based_sample_selection.yaml`
+
+### Information-theoretic Sample Selection
+- Implementation of Information-theoretic Sample Selection inspired by: `Information-Theoretic Online Memory Selection for Continual Learning (2022)`
+  (https://arxiv.org/pdf/2204.04763.pdf)
+- `info_theory_sample_selection.py` : threshold-based method. measures criteria M with surprise and learnability metric.
+- corresponding hparam file : `6_info_theory_sample_selection.yaml`
+
+  
 
 
