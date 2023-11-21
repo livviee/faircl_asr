@@ -534,8 +534,12 @@ def next_not_none_attribute_batch(times, attribute, train_loader):
     while True:
         next_batch = next(train_loader)
         
-        if next_batch == None:
-            return next_batch
+        try:
+            next_batch = next(train_loader)    
+        except StopIteration:
+            print("reached the end of the dataloader")
+            return times, None, train_loader
+        
         times += 1
         
         if attribute == "age":
