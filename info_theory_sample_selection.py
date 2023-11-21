@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Implementation of Sample Selection algorithm inspired by 
+Implementation of Sample Selection algorithm inspired by:
 "Information-Theoretic Online Memory Selection for Continual Learning (2022)"
 https://arxiv.org/pdf/2204.04763.pdf
 
