@@ -534,9 +534,14 @@ def entropy_based_data_selection(asr, size, attribute, train_loader, csv_file):
             append_batch_to_group_dict(next_batch, reservoir, asr, attribute)
             reservoir.delete_sample(min_dist_group, min_dist_id)
         
-        next_batch = next(train_loader)
+	try:
+            next_batch = next(train_loader)    
+        except StopIteration:
+            print("reached the end of the dataloader")
+            break
+        times += 1
         
-        times+=1
+        
         if(times % 1000 == 0) or times < 30:
             #print(reservoir.group_dict)
             print(reservoir.count_k_i)
