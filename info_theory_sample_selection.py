@@ -486,7 +486,11 @@ def info_theory_based_data_selection(asr, size, attribute, train_loader, csv_fil
                     reservoir.delete_sample_with_least_M()
                     reservoir.add_sample(next_group, next_object.id, next_object)
                     
-        next_batch = next(train_loader)    
+        try:
+            next_batch = next(train_loader)    
+        except StopIteration:
+            print("reached the end of the dataloader")
+            break
         times += 1
             
         if(times % 1000 == 0) or times < 30:
