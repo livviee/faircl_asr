@@ -375,7 +375,9 @@ def init_reservoir(reservoir, asr, train_loader):
     
     print("\ninit_reservoir\n")
     
-    for i in range(size):
+    times = 0
+    
+    while(True):
         batch = next(train_loader)
         
         if attribute == "age":
@@ -385,8 +387,11 @@ def init_reservoir(reservoir, asr, train_loader):
             
         if(next_group != ''):
             append_batch_to_group_dict(batch, reservoir, asr, attribute)
+            times += 1
             #print(str(i+1)+"th append ", batch.id[0])    
-    
+        if times == size:
+            break
+        
     print("end of init_reservoir\n")
     
     return train_loader
