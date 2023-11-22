@@ -38,14 +38,23 @@
    (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9287846)
 - `entropy_sample_selection.py` : indirectly measures distances of features with cosine similarities.
 - `entropy_sample_selection2.py` : faster version of above by removing and adding samples in bulk.
+- `entropy_sample_selection2_DP_ver.py` : Multi-GPU Distributed Processing ver of above.
 - corresponding hparam file : `5_entropy_based_sample_selection.yaml`
+  - for DP_ver, you need to set `batch_size >= 2`
+  - for the other, you need to set `batch_size = 1`
 
 ### Information-theoretic Sample Selection
 - Implementation of Information-theoretic Sample Selection inspired by: `Information-Theoretic Online Memory Selection for Continual Learning (2022)`
   (https://arxiv.org/pdf/2204.04763.pdf)
 - `info_theory_sample_selection.py` : threshold-based method. measures criteria M with surprise and learnability metric.
+- `info_theory_sample_selection_DP_ver.py` : Multi-GPU Distributed Processing ver of above.
 - corresponding hparam file : `6_info_theory_sample_selection.yaml`
-
+  - for DP_ver, you need to set `batch_size >= 2`
+  - for the other, you need to set `batch_size = 1`
+  - alter hyperparameters as you like: `alpha` `beta` `lambda`
+    - `alpha`: weight of between-group normalized loss
+    - `beta`: weight of within-group normalized loss
+    - `lambda`: weight of group sample_num balance
   
 
 
