@@ -51,7 +51,7 @@
 - corresponding hparam file : `6_info_theory_sample_selection.yaml`
   - for DP_ver, you need to set `batch_size >= 2`
   - for the other, you need to set `batch_size = 1`
-  - alter hyperparameters as you like: `alpha` `beta` `lambda`
+  - alter hyperparameters as you like:
     - `alpha`: weight of between-group normalized loss
     - `beta`: weight of within-group normalized loss
     - `lambda`: weight of group sample_num balance
