@@ -58,7 +58,7 @@ class ASR(sb.core.Brain):
             # Decode token terms to words
 
             sequence = sb.decoders.ctc_greedy_decode(
-                p_ctc, wav_lens, blank_id=self.hparams.blank_index
+                p_ctc, wav_lens, blank_id=-1
             )
             
             """
