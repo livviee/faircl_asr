@@ -3,7 +3,7 @@
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: 7007
+seed: 6116
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 output_folder: !ref /home/CVoice_hubert_ctc/result/hubert_ctc_en/<seed>
 test_wer_file: !ref <output_folder>/wer_test.txt
@@ -32,6 +32,10 @@ selected_sample_csv: !ref <save_folder>/selected_sample.csv ####################
 skip_prep: True ###################################
 
 
+reservoir_size: 100
+attribute: age
+
+
 # We remove utterance slonger than 10s in the train/dev/test sets as
 # longer sentences certainly correspond to "open microphones".
 avoid_if_longer_than: 10.0
@@ -50,9 +54,9 @@ ckpt_interval_minutes: 1 # save checkpoint every N min
 # With DDP batch_size is multiplied by N jobs
 ## Must be 6 per GPU to fit 16GB of VRAM
 # Must be 8 per GPU to fit 32GB of VRAM
-batch_size: 1
-test_batch_size: 1
-num_workers: 5 # 2 is better if the server is busy
+batch_size: 2
+test_batch_size: 2
+num_workers: 2 # 2 is better if the server is busy
 dataloader_num_workers: !ref <num_workers>
 test_num_workers: !ref <num_workers>
 pin_memory: True
@@ -157,6 +161,7 @@ log_softmax: !new:speechbrain.nnet.activations.Softmax
 
 ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
   blank_index: !ref <blank_index>
+  reduction: batch
 
 modules:
   wav2vec2: !ref <wav2vec2>
