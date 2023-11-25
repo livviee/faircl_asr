@@ -224,6 +224,7 @@ class Reservoir:
             self.cardinality = None
             
         self.size = size
+        self.current_total_samples = 0
         self.group_dict = {i:dict() for i in self.groups} # 각 group의 Sample 객체 dict를 저장
         self.max_M_sample = None
         self.majority_group = None
@@ -260,12 +261,19 @@ class Reservoir:
         self.group_running_mean_loss[group] = torch.mean(torch.tensor(list(group_loss_list.values())))
         #if self.count_k_i[group] != 1
         self.group_running_std_loss[group] = torch.std(torch.tensor(list(group_loss_list.values())))
-                          
+    
+    def update_current_total_samples(self):
+        total_samples = 0
+        for value in self.count_k_i.values():
+            total_samples += value
+        self.current_total_samples = total_samples
+    
     def update_count_k_i(self):
         """updates count_k_i & updates majority_group"""
         for key, value in self.group_dict.items():
             self.count_k_i[key] = len([item for item in value if item])
         self.find_majority_group()
+        self.update_current_total_samples()
         
     def delete_sample(self, group, i_d):
         self.group_dict[group].pop(i_d)
@@ -636,7 +644,8 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 wandb_log(reservoir, measure_M)
             elif init and reservoir.size == reservoir.current_total_samples:
                 break
-
+    
+    
 def init_reservoir(reservoir, asr, train_loader):
     
     size = reservoir.size
@@ -920,6 +929,9 @@ if __name__ == "__main__":
     
     
     print("end of main")
+    
+    
+
     
     
 
