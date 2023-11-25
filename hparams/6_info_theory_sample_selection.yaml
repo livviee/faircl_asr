@@ -3,7 +3,7 @@
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: 8008
+seed: 6006
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 output_folder: !ref /home/CVoice_hubert_ctc/result/hubert_ctc_en/<seed>
 test_wer_file: !ref <output_folder>/wer_test.txt
@@ -34,8 +34,13 @@ skip_prep: True ###################################
 
 # Hparam for Info-theory sample selection
 # learnability of measure M hparam
-alpha: 0.03
-beta: 0.03
+alpha: 0.3
+beta: 0.3
+lambda_: 1.5
+
+reservoir_size: 100
+attribute: age
+
 
 # We remove utterance slonger than 10s in the train/dev/test sets as
 # longer sentences certainly correspond to "open microphones".
@@ -55,9 +60,9 @@ ckpt_interval_minutes: 1 # save checkpoint every N min
 # With DDP batch_size is multiplied by N jobs
 ## Must be 6 per GPU to fit 16GB of VRAM
 # Must be 8 per GPU to fit 32GB of VRAM
-batch_size: 1
-test_batch_size: 1
-num_workers: 5 # 2 is better if the server is busy
+batch_size: 4
+test_batch_size: 4
+num_workers: 2 # 2 is better if the server is busy
 dataloader_num_workers: !ref <num_workers>
 test_num_workers: !ref <num_workers>
 pin_memory: True
@@ -165,6 +170,8 @@ softmax: !new:speechbrain.nnet.activations.Softmax
 
 ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
   blank_index: !ref <blank_index>
+  reduction: batch
+
 
 modules:
   wav2vec2: !ref <wav2vec2>
@@ -180,6 +187,9 @@ model_opt_class: !name:torch.optim.Adam
 
 #lr_annealing_model: !ref <lr_annealing_model_1>
 
+#reservoir: !new:info_theory_sample_selection_DP_ver.Reservoir
+#  size: !ref <reservoir_size>
+#  attribute: !ref <attribute>
 
 lr_annealing_model_1: !new:mySchedulers.MyIntervalScheduler
   lr_initial: !ref <peak_lr>
@@ -227,3 +237,4 @@ error_rate_computer: !name:speechbrain.utils.metric_stats.ErrorRateStats
 
 cer_computer: !name:speechbrain.utils.metric_stats.ErrorRateStats
   split_tokens: True
+
