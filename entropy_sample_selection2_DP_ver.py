@@ -229,6 +229,8 @@ class Reservoir:
             self.cardinality = None
             
         self.size = size
+        self.current_total_samples = 0
+        self.init_phase = True
         self.group_dict = {i:dict() for i in self.groups} # 각 group의 Sample 객체 dict를 저장
         self.max_M_sample = None
         self.majority_group = None
@@ -250,12 +252,24 @@ class Reservoir:
         
         return self.second_majority_group
     
+    def update_current_total_samples(self):
+        total_samples = 0
+        for value in self.count_k_i.values():
+            total_samples += value
+        self.current_total_samples = total_samples
+        
+    def update_phase(self):
+        if self.init_phase and (self.current_total_samples == self.size):
+            self.init_phase = False
+        
     def update_count_k_i(self):
         """updates count_k_i & updates majority_group"""
         for key, value in self.group_dict.items():
             self.count_k_i[key] = len([item for item in value if item])
         self.find_majority_group()
         self.find_second_majority_group()
+        self.update_current_total_samples()
+        self.update_phase()
         wandb_log(self)
         
     def delete_sample(self, group, i_d):
@@ -359,6 +373,82 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
             elif times == reservoir.size:
                 break
     reservoir.update_count_k_i()
+    
+    return times
+
+# for in-processing sample selection
+def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
+    
+    reservoir = asr.reservoir
+    init = asr.reservoir.init_phase
+    
+    attribute = asr.attribute
+    n_diff = asr.n_diff
+    #prev_total_samples = asr.reservoir.current_total_samples
+    
+    batch = batch.to(asr.device)
+    batch_size = len(batch.id)
+    
+    i_d = batch.id
+    duration = batch.duration
+    path = batch.wav
+    spk_id = batch.spk_id
+    wrd = batch.wrd
+    age = batch.age
+    gender = batch.gender
+    accents = batch.accents
+    tokens_bos, _ = batch.tokens_bos
+    tokens_eos, _ = batch.tokens_eos
+    
+    times = 0
+    
+    if attribute == "age":
+        for i in range(batch_size):
+            if age[i] == '':
+                continue
+            elif ((not init) and times < n_diff) or (init and reservoir.current_total_samples < reservoir.size):
+                sample_object = Sample(i_d[i],
+                                    duration[i].item(), 
+                                    path[i], 
+                                    spk_id[i], 
+                                    wrd[i], 
+                                    age[i], 
+                                    gender[i], 
+                                    accents[i], 
+                                    tokens_bos[i], 
+                                    tokens_eos[i], 
+                                    feats[i],
+                                    softmax[i],
+                                    loss[i])
+                #reservoir.group_dict[age[i]][i_d[i]] = sample_object
+                reservoir.add_sample(age[i], i_d[i], sample_object)
+                times += 1
+            elif ((not init) and times == n_diff) or (init and reservoir.current_total_samples == reservoir.size):
+                break
+                
+    elif attribute == "gender":
+        for i in range(batch_size):
+            if gender[i] == '':
+                continue
+            elif ((not init) and times < n_diff) or (init and reservoir.current_total_samples < reservoir.size):
+                sample_object = Sample(i_d[i],
+                                    duration[i].item(), 
+                                    path[i], 
+                                    spk_id[i], 
+                                    wrd[i], 
+                                    age[i], 
+                                    gender[i], 
+                                    accents[i], 
+                                    tokens_bos[i], 
+                                    tokens_eos[i], 
+                                    feats[i],
+                                    softmax[i],
+                                    loss[i])
+                #reservoir.group_dict[gender[i]][i_d[i]] = sample_object
+                reservoir.add_sample(gender[i], i_d[i], sample_object)
+                times += 1
+            elif ((not init) and times == n_diff) or (init and reservoir.current_total_samples == reservoir.size):
+                break
     
     return times
 
@@ -585,15 +675,15 @@ def entropy_based_data_selection(asr, size, attribute, train_loader, csv_file):
     
 
 def wandb_log(reservoir):
-    wandb.log({"teens" : self.count_k_i["teens"]})
-    wandb.log({"twenties" : self.count_k_i["twenties"]})
-    wandb.log({"thrities" : self.count_k_i["thirties"]})
-    wandb.log({"fourties" : self.count_k_i["fourties"]})
-    wandb.log({"fifties" : self.count_k_i["fifties"]})
-    wandb.log({"sixties" : self.count_k_i["sixties"]})
-    wandb.log({"seventies" : self.count_k_i["seventies"]})
-    wandb.log({"eighties" : self.count_k_i["eighties"]})
-    wandb.log({"nineties" : self.count_k_i["nineties"]})
+    wandb.log({"teens" : reservoir.count_k_i["teens"]})
+    wandb.log({"twenties" : reservoir.count_k_i["twenties"]})
+    wandb.log({"thrities" : reservoir.count_k_i["thirties"]})
+    wandb.log({"fourties" : reservoir.count_k_i["fourties"]})
+    wandb.log({"fifties" : reservoir.count_k_i["fifties"]})
+    wandb.log({"sixties" : reservoir.count_k_i["sixties"]})
+    wandb.log({"seventies" : reservoir.count_k_i["seventies"]})
+    wandb.log({"eighties" : reservoir.count_k_i["eighties"]})
+    wandb.log({"nineties" : reservoir.count_k_i["nineties"]})
     
     
 if __name__ == "__main__":
@@ -701,7 +791,6 @@ if __name__ == "__main__":
     
     
     print("end of main")
-    
     
 
     
