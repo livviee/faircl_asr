@@ -493,6 +493,150 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
     return times
 
 
+# for in-training selection
+def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
+    
+    alpha = asr.hparams.alpha
+    beta = asr.hparams.beta
+    
+    
+    reservoir = asr.reservoir
+    init = reservoir.size > reservoir.current_total_samples
+    
+    attribute = asr.attribute
+    lambda_ = asr.lambda_
+    
+    batch = batch.to(asr.device)
+    batch_size = len(batch.id)
+    
+    i_d = batch.id
+    duration = batch.duration
+    path = batch.wav
+    spk_id = batch.spk_id
+    wrd = batch.wrd
+    age = batch.age
+    gender = batch.gender
+    accents = batch.accents
+    tokens_bos, _ = batch.tokens_bos
+    tokens_eos, _ = batch.tokens_eos
+    
+ 
+    
+    if attribute == "age":
+        for i in range(batch_size):
+            if age[i] == '':
+                continue
+            elif not init:
+                measure_M = compute_measure_M(reservoir, age[i], loss[i], softmax[i], alpha, beta)
+                
+                gamma = compute_gamma(reservoir, age[i])
+                threshold = reservoir.running_mean_M + reservoir.running_std_M * lambda_ * gamma
+                
+                if measure_M > threshold:
+                    prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
+                                    loc=reservoir.running_mean_M.detach().cpu().numpy(), 
+                                    scale=reservoir.running_std_M.detach().cpu().numpy())
+            
+                    if np.random.binomial(n=1, p=prob):
+                        # replace samples
+                        reservoir.delete_sample_with_least_M()
+                        sample_object = Sample(i_d[i],
+                                            duration[i].item(), 
+                                            path[i], 
+                                            spk_id[i], 
+                                            wrd[i], 
+                                            age[i], 
+                                            gender[i], 
+                                            accents[i], 
+                                            tokens_bos[i], 
+                                            tokens_eos[i], 
+                                            feats[i],
+                                            softmax[i],
+                                            loss[i],
+                                            measure_M)
+                        reservoir.add_sample(age[i], i_d[i], sample_object) ############
+                        #times += 1
+                        wandb_log(reservoir, measure_M, threshold, gamma)
+
+            elif init and reservoir.size > reservoir.current_total_samples:
+                measure_M = compute_measure_M(reservoir, age[i], loss[i], softmax[i], alpha, beta)
+                sample_object = Sample(i_d[i],
+                                    duration[i].item(), 
+                                    path[i], 
+                                    spk_id[i], 
+                                    wrd[i], 
+                                    age[i], 
+                                    gender[i], 
+                                    accents[i], 
+                                    tokens_bos[i], 
+                                    tokens_eos[i], 
+                                    feats[i],
+                                    softmax[i],
+                                    loss[i],
+                                    measure_M)
+                reservoir.add_sample(age[i], i_d[i], sample_object)
+                #times += 1
+                wandb_log(reservoir, measure_M)
+            elif init and reservoir.size == reservoir.current_total_samples:
+                break
+                
+    elif attribute == "gender":
+        for i in range(batch_size):
+            if gender[i] == '':
+                continue
+            elif not init:
+                measure_M = compute_measure_M(reservoir, gender[i], loss[i], softmax[i], alpha, beta)
+                gamma = compute_gamma(reservoir, gender[i])
+                threshold = reservoir.running_mean_M + reservoir.running_std_M * lambda_ * gamma
+                
+                if measure_M > threshold:
+                    prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
+                                    loc=reservoir.running_mean_M.detach().cpu().numpy(), 
+                                    scale=reservoir.running_std_M.detach().cpu().numpy())
+            
+                    if np.random.binomial(n=1, p=prob):
+                        # replace samples
+                        reservoir.delete_sample_with_least_M()
+                        sample_object = Sample(i_d[i],
+                                            duration[i].item(), 
+                                            path[i], 
+                                            spk_id[i], 
+                                            wrd[i], 
+                                            age[i], 
+                                            gender[i], 
+                                            accents[i], 
+                                            tokens_bos[i], 
+                                            tokens_eos[i], 
+                                            feats[i],
+                                            softmax[i],
+                                            loss[i],
+                                            measure_M)
+                        reservoir.add_sample(gender[i], i_d[i], sample_object)
+                        #times += 1
+                        wandb_log(reservoir, measure_M, threshold, gamma)
+
+            elif init and reservoir.size > reservoir.current_total_samples:
+                measure_M = compute_measure_M(reservoir, gender[i], loss[i], softmax[i], alpha, beta)
+                sample_object = Sample(i_d[i],
+                                    duration[i].item(), 
+                                    path[i], 
+                                    spk_id[i], 
+                                    wrd[i], 
+                                    age[i], 
+                                    gender[i], 
+                                    accents[i], 
+                                    tokens_bos[i], 
+                                    tokens_eos[i], 
+                                    feats[i],
+                                    softmax[i],
+                                    loss[i],
+                                    measure_M)
+                reservoir.add_sample(gender[i], i_d[i], sample_object)
+                #times += 1
+                wandb_log(reservoir, measure_M)
+            elif init and reservoir.size == reservoir.current_total_samples:
+                break
+
 def init_reservoir(reservoir, asr, train_loader):
     
     size = reservoir.size
