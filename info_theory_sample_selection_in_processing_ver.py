@@ -407,7 +407,14 @@ if __name__ == "__main__":
         train_loader_kwargs=hparams["dataloader_options"],
         valid_loader_kwargs=hparams["test_dataloader_options"],
     )
-    
+
+
+    # Test
+    asr_brain.evaluate(
+        test_data,
+        min_key="WER",
+        test_loader_kwargs=hparams["test_dataloader_options"],
+    )
     
 
     
