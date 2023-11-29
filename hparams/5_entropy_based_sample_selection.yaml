@@ -29,7 +29,7 @@ selected_sample_csv: !ref <save_folder>/selected_sample.csv ####################
 skip_prep: True ###################################
 
 
-reservoir_size: 10600
+reservoir_size: 10000
 attribute: age
 lambda_star: 0.125
 sample_selection_epoch: 1
