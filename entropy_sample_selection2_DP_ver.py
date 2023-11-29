@@ -135,7 +135,7 @@ def dataio_prepare(hparams, tokenizer):
     sb.dataio.dataset.set_output_keys(
         #csv: "ID", "duration", "wav-경로", "spk_id", "wrd", "age", "gender", "accents"
         datasets, ["id", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents",
-                   "sig", "tokens_bos", "tokens_eos", "tokens"],
+                   "sig", "tokens"],
     )
     return train_data, valid_data, test_data
     
