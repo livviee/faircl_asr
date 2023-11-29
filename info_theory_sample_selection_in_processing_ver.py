@@ -29,7 +29,7 @@ class ASR(sb.core.Brain):
     
         batch = batch.to(self.device)
         wavs, wav_lens = batch.sig
-        tokens_bos, _ = batch.tokens_bos
+        #tokens_bos, _ = batch.tokens_bos
         wavs, wav_lens = wavs.to(self.device), wav_lens.to(self.device)
         
         if stage == sb.Stage.TRAIN:
@@ -49,7 +49,7 @@ class ASR(sb.core.Brain):
         p_ctc, wav_lens, feats = predictions
         
         ids = batch.id
-        tokens_eos, tokens_eos_lens = batch.tokens_eos
+        #tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
         tokens, tokens_lens = tokens.to(self.device), tokens_lens.to(self.device)
 
@@ -141,10 +141,21 @@ class ASR(sb.core.Brain):
 
             p_ctc, feats, losses, loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
 
-            wandb.log({"Training loss": loss})
+            if self.sample_selection:
             
-            #softmax = p_ctc
-            append_batch_to_group_dict2(batch, feats, p_ctc, losses, self)
+                times, appended_num_list = append_batch_to_group_dict2(batch, feats, p_ctc, losses, self)
+                
+                weight = torch.ones(len(batch.id)).to(self.device)
+                
+                for i in range(len(batch.id)):
+                    if i in appended_num_list:
+                        weight[i] = (1+self.lambda_star)
+                
+                losses = losses * weight
+                loss = torch.mean(losses)
+            
+            
+            wandb.log({"Training loss": loss})
             
             with self.no_sync(not should_step):
                 (loss / self.grad_accumulation_factor).backward() # 여기서 문제
@@ -212,6 +223,11 @@ class ASR(sb.core.Brain):
 
     def on_stage_start(self, stage, epoch):
         """Gets called at the beginning of each epoch"""
+        if epoch >= self.hparams.sample_selection_epoch:
+            self.sample_selection = True
+        else:
+            self.sample_selection = False
+        
         if stage != sb.Stage.TRAIN:
             self.cer_metric = self.hparams.cer_computer()
             self.wer_metric = self.hparams.error_rate_computer()
@@ -381,6 +397,8 @@ if __name__ == "__main__":
     asr_brain.csv_file = asr_brain.hparams.selected_sample_csv
     asr_brain.attribute = asr_brain.hparams.attribute
     asr_brain.lambda_ = asr_brain.hparams.lambda_
+    asr_brain.sample_selection = False
+    asr_brain.lambda_star = asr_brain.hparams.lambda_star
     
     asr_brain.fit(
         asr_brain.hparams.epoch_counter,
@@ -391,13 +409,7 @@ if __name__ == "__main__":
     )
     
     
-    # Test
-    asr_brain.evaluate(
-        test_data,
-        min_key="WER",
-        test_loader_kwargs=hparams["test_dataloader_options"],
-    )
-    
 
+    
     
     
