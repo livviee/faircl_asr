@@ -122,7 +122,6 @@ def dataio_prepare(hparams, tokenizer):
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        #csv: "ID", "duration", "wav-경로", "spk_id", "wrd", "age", "gender", "accents"
         datasets, ["id", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents",
                    "sig", "tokens_bos", "tokens_eos", "tokens"],
     )
@@ -145,7 +144,6 @@ def create_csv(csv_file, reservoir):
             csv_f, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL
         )
 
-        #csv_writer.writerow(["ID", "wav", "spk_id", "wrd", "age", "gender", "accents"])
         csv_writer.writerow(["ID", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents"])
         
         
@@ -176,8 +174,7 @@ def create_csv(csv_file, reservoir):
 
 #@dataclass        
 class Sample:
-    def __init__(self, id, duration, wav, spk_id, wrd, age, gender, accents, 
-                 tokens_bos, tokens_eos, 
+    def __init__(self, id, duration, wav, spk_id, wrd, age, gender, accents,  
                  feats, softmax, loss, measure_M):
         self.id = id
         self.duration = duration
@@ -187,13 +184,8 @@ class Sample:
         self.age = age
         self.gender = gender
         self.accents = accents
-        #self.sig = sig
-        self.tokens_bos = tokens_bos
-        self.tokens_eos = tokens_eos
-        #self.tokens = tokens
         
         self.feats = feats
-        #self.logits = logits
         self.softmax = softmax
         self.loss = loss
         self.measure_M = measure_M
@@ -225,14 +217,14 @@ class Reservoir:
             
         self.size = size
         self.current_total_samples = 0
-        self.group_dict = {i:dict() for i in self.groups} # 각 group의 Sample 객체 dict를 저장
+        self.group_dict = {i:dict() for i in self.groups}
         self.max_M_sample = None
         self.majority_group = None
         
         self.running_M = dict()
         self.running_mean_M = None
         self.running_std_M = None
-        self.group_running_loss = {i:dict() for i in self.groups} # fourties: {i_d : loss}
+        self.group_running_loss = {i:dict() for i in self.groups}
         self.group_running_mean_loss = {i:0.0 for i in self.groups}
         self.group_running_std_loss = {i:0.0 for i in self.groups}
         
@@ -259,7 +251,6 @@ class Reservoir:
         group_loss_list = self.group_running_loss[group]
         
         self.group_running_mean_loss[group] = torch.mean(torch.tensor(list(group_loss_list.values())))
-        #if self.count_k_i[group] != 1
         self.group_running_std_loss[group] = torch.std(torch.tensor(list(group_loss_list.values())))
     
     def update_current_total_samples(self):
@@ -291,6 +282,7 @@ class Reservoir:
         self.update_M_stats()
         self.update_group_loss_stats(group)
         
+        
     def __str__(self):
         info = "attribute: " + self.attribute +\
                 "\ncount_k_i: " + self.count_k_i +\
@@ -315,8 +307,6 @@ def make_sample_object(reservoir, group, batch, asr):
     age = batch.age[0]
     gender = batch.gender[0]
     accents = batch.accents[0]
-    tokens_bos, _ = batch.tokens_bos
-    tokens_eos, _ = batch.tokens_eos
     tokens, tokens_lens = batch.tokens
     
     # Forward pass
@@ -329,8 +319,6 @@ def make_sample_object(reservoir, group, batch, asr):
     
     # Evaluate
     loss = asr.hparams.ctc_cost(softmax, tokens, wav_lens, tokens_lens)
-    #print(loss)
-    #debug = input()
     measure_M = compute_measure_M(reservoir, group, loss, softmax, alpha, beta)
 
     return Sample(i_d, 
@@ -341,8 +329,6 @@ def make_sample_object(reservoir, group, batch, asr):
                 age, 
                 gender, 
                 accents, 
-                tokens_bos, 
-                tokens_eos,
                 feats,
                 logits,
                 softmax,
@@ -369,9 +355,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
     age = batch.age
     gender = batch.gender
     accents = batch.accents
-    tokens_bos, _ = batch.tokens_bos
-    tokens_eos, _ = batch.tokens_eos
-    
     tokens, tokens_lens = batch.tokens
 
     with torch.no_grad():
@@ -409,13 +392,11 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            tokens_bos[i], 
-                                            tokens_eos[i], 
                                             feats[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
-                        reservoir.add_sample(age[i], i_d[i], sample_object) ############
+                        reservoir.add_sample(age[i], i_d[i], sample_object)
                         times += 1
                         wandb_log(reservoir, measure_M, threshold, gamma)
 
@@ -429,8 +410,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    tokens_bos[i], 
-                                    tokens_eos[i], 
                                     feats[i],
                                     softmax[i],
                                     loss[i],
@@ -466,8 +445,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            tokens_bos[i], 
-                                            tokens_eos[i], 
                                             feats[i],
                                             softmax[i],
                                             loss[i],
@@ -486,8 +463,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    tokens_bos[i], 
-                                    tokens_eos[i], 
                                     feats[i],
                                     softmax[i],
                                     loss[i],
@@ -525,10 +500,10 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
     age = batch.age
     gender = batch.gender
     accents = batch.accents
-    tokens_bos, _ = batch.tokens_bos
-    tokens_eos, _ = batch.tokens_eos
+
+    appended_num_list = list()
     
- 
+    times = 0
     
     if attribute == "age":
         for i in range(batch_size):
@@ -556,14 +531,13 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            tokens_bos[i], 
-                                            tokens_eos[i], 
                                             feats[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
-                        reservoir.add_sample(age[i], i_d[i], sample_object) ############
-                        #times += 1
+                        reservoir.add_sample(age[i], i_d[i], sample_object)
+                        times += 1
+                        appended_num_list.append(i)
                         wandb_log(reservoir, measure_M, threshold, gamma)
 
             elif init and reservoir.size > reservoir.current_total_samples:
@@ -576,14 +550,13 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    tokens_bos[i], 
-                                    tokens_eos[i], 
                                     feats[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
                 reservoir.add_sample(age[i], i_d[i], sample_object)
-                #times += 1
+                times += 1
+                appended_num_list.append(i)
                 wandb_log(reservoir, measure_M)
             elif init and reservoir.size == reservoir.current_total_samples:
                 break
@@ -613,14 +586,13 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            tokens_bos[i], 
-                                            tokens_eos[i], 
                                             feats[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
                         reservoir.add_sample(gender[i], i_d[i], sample_object)
-                        #times += 1
+                        times += 1
+                        appended_num_list.append(i)
                         wandb_log(reservoir, measure_M, threshold, gamma)
 
             elif init and reservoir.size > reservoir.current_total_samples:
@@ -633,17 +605,18 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    tokens_bos[i], 
-                                    tokens_eos[i], 
                                     feats[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
                 reservoir.add_sample(gender[i], i_d[i], sample_object)
-                #times += 1
+                times += 1
+                appended_num_list.append(i)
                 wandb_log(reservoir, measure_M)
             elif init and reservoir.size == reservoir.current_total_samples:
                 break
+            
+    return times, appended_num_list
     
     
 def init_reservoir(reservoir, asr, train_loader):
@@ -673,9 +646,6 @@ def compute_uncertainty(softmax):
     return torch.mean(Categorical(probs = softmax).entropy())
     
 def compute_learnability(reservoir, group, loss, alpha, beta):
-    #self.group_running_loss = {i:dict() for i in self.groups} # fourties: {i_d : loss}
-    #self.group_running_mean_loss = {i:0 for i in self.groups}
-    #self.group_running_std_loss = {i:0 for i in self.groups}
 
     total_group_mean = torch.mean(torch.tensor(list(reservoir.group_running_mean_loss.values())))
     total_group_std = torch.std(torch.tensor(list(reservoir.group_running_mean_loss.values())))
@@ -692,7 +662,6 @@ def compute_learnability(reservoir, group, loss, alpha, beta):
     learnability = alpha * between_group_confidence + beta * within_group_confidence
     
     if reservoir.count_k_i[group] == 0:
-        #print("first entering of the group ", group)
         learnability = torch.tensor(0.0)
     
     return learnability
@@ -706,19 +675,13 @@ def compute_measure_M(reservoir, group, loss, softmax, alpha, beta):
     return measure_M
     
 def compute_gamma(reservoir, group):
-    #self.count_k_i = {i:0 for i in self.groups}
-    
-    #mean_k = torch.mean(reservoir.count_k_i.values())
     balanced_k = reservoir.size / len(reservoir.count_k_i)
-    #print(torch.tensor([float(x) for x in list(reservoir.count_k_i.values())]))
     std_k = torch.std(torch.tensor([float(x) for x in list(reservoir.count_k_i.values())]))
     group_k = reservoir.count_k_i[group]
-    
-    #prob = norm.pdf(x=group_k, loc=mean_k, scale=std_k)
     prob = norm.pdf(x=group_k, loc=balanced_k, scale=std_k)
     return prob * math.copysign(1, group_k - balanced_k)
 
-#def reservoir_sampling():
+
     
     
     
@@ -759,8 +722,7 @@ def info_theory_based_data_selection(asr, size, attribute, train_loader, csv_fil
             break
         
             
-        if(times % 1000 == 0): # or times < reservoir.size + 30:
-            #print(reservoir.group_dict)
+        if(times % 1000 == 0):
             print("\n")
             print(reservoir.count_k_i)
             print("\n\n")
@@ -831,8 +793,6 @@ if __name__ == "__main__":
         "alpha": hparams["alpha"],
         "beta": hparams["beta"],
         "lambda_": hparams["lambda_"],
-        #"peak_lr": hparams["peak_lr"],
-        #"epochs": hparams["number_of_epochs"],
         "batch_size": hparams["batch_size"],
         "num_workers": hparams["num_workers"]
     }
@@ -919,9 +879,8 @@ if __name__ == "__main__":
     
     
     
-    size = 10000
+    size = hparams["reservoir_size"]
     attribute = "age"
-    #alpha, beta = 0.03, 0.03
     csv_file = hparams["selected_sample_csv"]
     
     
@@ -930,6 +889,8 @@ if __name__ == "__main__":
     
     print("end of main")
     
+    
+
     
 
     
