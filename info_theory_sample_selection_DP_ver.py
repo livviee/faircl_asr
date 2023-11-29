@@ -123,7 +123,7 @@ def dataio_prepare(hparams, tokenizer):
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
         datasets, ["id", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents",
-                   "sig", "tokens_bos", "tokens_eos", "tokens"],
+                   "sig", "tokens"],
     )
     return train_data, valid_data, test_data
     
