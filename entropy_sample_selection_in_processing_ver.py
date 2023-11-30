@@ -148,9 +148,9 @@ class ASR(sb.core.Brain):
                         self.n_diff = self.reservoir.count_k_i[self.reservoir.majority_group] - self.reservoir.count_k_i[self.reservoir.second_majority_group]
 
                         if (self.n_diff == 0):
-                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group(self.reservoir, 1, self)
+                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group2(self.reservoir, 1, self)
                         else:
-                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group(self.reservoir, self.n_diff, self)
+                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group2(self.reservoir, self.n_diff, self)
                         
                         if self.attribute == "age":
                             min_dist_group = min_dist_objects[0].age
