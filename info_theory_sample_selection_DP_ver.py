@@ -33,6 +33,7 @@ from scipy.stats import norm
 import math
 import numpy as np 
 import torch.nn as nn
+import gc
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ def create_csv(csv_file, reservoir):
             csv_f, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL
         )
 
-        csv_writer.writerow(["ID", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents"])
+        csv_writer.writerow(["ID"])
         
         
         final_dict = reservoir.group_dict
@@ -154,13 +155,6 @@ def create_csv(csv_file, reservoir):
                 csv_writer.writerow(
                     [
                         sample_object.id,
-                        sample_object.duration,
-                        sample_object.wav,
-                        sample_object.spk_id,
-                        sample_object.wrd,
-                        sample_object.age,
-                        sample_object.gender,
-                        sample_object.accents
                     ]
                 )
     
@@ -174,18 +168,14 @@ def create_csv(csv_file, reservoir):
 
 #@dataclass        
 class Sample:
-    def __init__(self, id, duration, wav, spk_id, wrd, age, gender, accents,  
-                 feats, softmax, loss, measure_M):
+    def __init__(self, id, duration, age, gender, accents,  
+                 softmax, loss, measure_M):
         self.id = id
         self.duration = duration
-        self.wav = wav # path
-        self.spk_id = spk_id
-        self.wrd = wrd
         self.age = age
         self.gender = gender
         self.accents = accents
         
-        self.feats = feats
         self.softmax = softmax
         self.loss = loss
         self.measure_M = measure_M
@@ -273,6 +263,7 @@ class Reservoir:
         self.update_count_k_i()
         self.update_M_stats()
         self.update_group_loss_stats(group)
+        gc.collect()
     
     def add_sample(self, group, i_d, sample_object):
         self.group_dict[group][i_d] = sample_object
@@ -301,18 +292,16 @@ def make_sample_object(reservoir, group, batch, asr):
         
     i_d = batch.id[0]
     duration = batch.duration[0]
-    path = batch.wav[0]
-    spk_id = batch.spk_id[0]
-    wrd = batch.wrd[0]
     age = batch.age[0]
     gender = batch.gender[0]
     accents = batch.accents[0]
     tokens, tokens_lens = batch.tokens
     
-    # Forward pass
-    feats = asr.modules.wav2vec2(wavs, wav_lens)
-    logits = asr.modules.ctc_lin(feats)
-    softmax = asr.hparams.softmax(logits) # p_ctc
+    with torch.no_grad(): 
+        # Forward pass
+        feats = asr.modules.wav2vec2(wavs, wav_lens)
+        logits = asr.modules.ctc_lin(feats)
+        softmax = asr.hparams.softmax(logits) # p_ctc
     
     alpha = asr.hparams.alpha
     beta = asr.hparams.beta
@@ -323,13 +312,9 @@ def make_sample_object(reservoir, group, batch, asr):
 
     return Sample(i_d, 
                 duration, 
-                path, 
-                spk_id, 
-                wrd, 
                 age, 
                 gender, 
                 accents, 
-                feats,
                 logits,
                 softmax,
                 loss,
@@ -349,9 +334,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
     
     i_d = batch.id
     duration = batch.duration
-    path = batch.wav
-    spk_id = batch.spk_id
-    wrd = batch.wrd
     age = batch.age
     gender = batch.gender
     accents = batch.accents
@@ -386,13 +368,9 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                         reservoir.delete_sample_with_least_M()
                         sample_object = Sample(i_d[i],
                                             duration[i].item(), 
-                                            path[i], 
-                                            spk_id[i], 
-                                            wrd[i], 
                                             age[i], 
                                             gender[i], 
-                                            accents[i], 
-                                            feats[i],
+                                            accents[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -404,13 +382,9 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                 measure_M = compute_measure_M(reservoir, age[i], loss[i], softmax[i], alpha, beta)
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
-                                    accents[i], 
-                                    feats[i],
+                                    accents[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
@@ -439,13 +413,9 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                         reservoir.delete_sample_with_least_M()
                         sample_object = Sample(i_d[i],
                                             duration[i].item(), 
-                                            path[i], 
-                                            spk_id[i], 
-                                            wrd[i], 
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            feats[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -457,13 +427,9 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                 measure_M = compute_measure_M(reservoir, gender[i], loss[i], softmax[i], alpha, beta)
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    feats[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
@@ -494,9 +460,6 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
     
     i_d = batch.id
     duration = batch.duration
-    path = batch.wav
-    spk_id = batch.spk_id
-    wrd = batch.wrd
     age = batch.age
     gender = batch.gender
     accents = batch.accents
@@ -525,13 +488,9 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                         reservoir.delete_sample_with_least_M()
                         sample_object = Sample(i_d[i],
                                             duration[i].item(), 
-                                            path[i], 
-                                            spk_id[i], 
-                                            wrd[i], 
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            feats[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -544,13 +503,9 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 measure_M = compute_measure_M(reservoir, age[i], loss[i], softmax[i], alpha, beta)
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    feats[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
@@ -580,13 +535,9 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                         reservoir.delete_sample_with_least_M()
                         sample_object = Sample(i_d[i],
                                             duration[i].item(), 
-                                            path[i], 
-                                            spk_id[i], 
-                                            wrd[i], 
                                             age[i], 
                                             gender[i], 
                                             accents[i], 
-                                            feats[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -599,13 +550,9 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 measure_M = compute_measure_M(reservoir, gender[i], loss[i], softmax[i], alpha, beta)
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    feats[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
