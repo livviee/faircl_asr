@@ -43,6 +43,7 @@ import numpy as np
 from torch.utils.data import WeightedRandomSampler
 import torch.nn as nn
 import pandas as pd
+import gc
 #from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,6 @@ def dataio_prepare(hparams, tokenizer):
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        #csv: "ID", "duration", "wav-경로", "spk_id", "wrd", "age", "gender", "accents"
         datasets, ["id", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents",
                    "sig", "tokens"],
     )
@@ -156,8 +156,7 @@ def create_csv(csv_file, reservoir):
             csv_f, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL
         )
 
-        #csv_writer.writerow(["ID", "wav", "spk_id", "wrd", "age", "gender", "accents"])
-        csv_writer.writerow(["ID", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents"])
+        csv_writer.writerow(["ID"])
         
         
         final_dict = reservoir.group_dict
@@ -167,13 +166,6 @@ def create_csv(csv_file, reservoir):
                 csv_writer.writerow(
                     [
                         sample_object.id,
-                        sample_object.duration,
-                        sample_object.wav,
-                        sample_object.spk_id,
-                        sample_object.wrd,
-                        sample_object.age,
-                        sample_object.gender,
-                        sample_object.accents
                     ]
                 )
     
@@ -188,18 +180,13 @@ def create_csv(csv_file, reservoir):
         
 #@dataclass        
 class Sample:
-    def __init__(self, id, duration, wav, spk_id, wrd, age, gender, accents, feats, softmax, loss, measure_M=None, distance=None, similarity=None):
+    def __init__(self, id, duration, age, gender, accents, feats, measure_M=None, distance=None, similarity=None):
         self.id = id
         self.duration = duration
-        self.wav = wav # path
-        self.spk_id = spk_id
-        self.wrd = wrd
         self.age = age
         self.gender = gender
         self.accents = accents
         self.feats = feats
-        self.softmax = softmax
-        self.loss = loss
         
         if measure_M is not None and distance is not None and similarity is not None:
             self.measure_M = measure_M
@@ -211,7 +198,7 @@ class Sample:
             self.similarity = 0
     
     def return_list(self):
-        return_list = [self.id, self.duration, self.wav, self.spk_id, self.wrd, self.age, self.gender, self.accents, self.feats, self.softmax, self.loss, self.measure_M, self.distance, self.similarity]
+        return_list = [self.id, self.duration, self.age, self.gender, self.accents, self.feats, self.measure_M, self.distance, self.similarity]
         return return_list
         
     def add_distance(self, distance_val):
@@ -307,11 +294,13 @@ class Reservoir:
     def delete_sample(self, group, i_d):
         self.group_dict[group].pop(i_d)
         self.update_count_k_i()
+        gc.collect()
     
     def delete_samples(self, group, i_ds):
         for i_d in i_ds:
             self.group_dict[group].pop(i_d)
         self.update_count_k_i()
+        gc.collect()
     
     def add_sample(self, group, i_d, sample_object, update=True):
         self.group_dict[group][i_d] = sample_object
@@ -394,25 +383,15 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
     
     i_d = batch.id
     duration = batch.duration
-    path = batch.wav
-    spk_id = batch.spk_id
-    wrd = batch.wrd
     age = batch.age
     gender = batch.gender
     accents = batch.accents
-
     
     tokens, tokens_lens = batch.tokens
 
     with torch.no_grad():
         # Forward pass
         feats = asr.modules.wav2vec2(wavs, wav_lens)
-        logits = asr.modules.ctc_lin(feats)
-        softmax = asr.hparams.log_softmax(logits) # p_ctc
-        
-        # Evaluate
-        loss = asr.hparams.ctc_cost(softmax, tokens, wav_lens, tokens_lens)
-    
     
     if attribute == "age":
         for i in range(batch_size):
@@ -421,15 +400,10 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
             elif ((not init) and times < prev_times + n_diff) or (init and times < reservoir.size):
                 reservoir.group_dict[age[i]][i_d[i]] = Sample(i_d[i],
                                                             duration[i].item(), 
-                                                            path[i], 
-                                                            spk_id[i], 
-                                                            wrd[i], 
-                                                            age[i], 
                                                             gender[i], 
                                                             accents[i], 
                                                             feats[i],
-                                                            softmax[i],
-                                                            loss[i])
+                                                            )
                 times += 1
             elif ((not init) and times == prev_times + n_diff) or (init and times == reservoir.size):
                 break
@@ -441,15 +415,11 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
             elif (not init) or (init and times < reservoir.size):
                 reservoir.group_dict[gender[i]][i_d[i]] = Sample(i_d[i],
                                                             duration[i].item(), 
-                                                            path[i], 
-                                                            spk_id[i], 
-                                                            wrd[i], 
                                                             age[i], 
                                                             gender[i], 
                                                             accents[i], 
                                                             feats[i],
-                                                            softmax[i],
-                                                            loss[i])
+                                                            )
                 times += 1
             elif times == reservoir.size:
                 break
@@ -465,17 +435,15 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
     
     attribute = asr.attribute
     n_diff = asr.n_diff
-
+    
     batch_size = len(batch.id)
     
     i_d = batch.id
     duration = batch.duration
-    path = batch.wav
-    spk_id = batch.spk_id
-    wrd = batch.wrd
     age = batch.age
     gender = batch.gender
     accents = batch.accents
+
     
     appended_num_list = list()
     
@@ -488,15 +456,11 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
             elif ((not init) and times < n_diff) or (init and reservoir.current_total_samples < reservoir.size):
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
                                     feats[i],
-                                    softmax[i],
-                                    loss[i])
+                                    )
 
                 reservoir.add_sample(age[i], i_d[i], sample_object, True)
                 times += 1
@@ -511,15 +475,11 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
             elif ((not init) and times < n_diff) or (init and reservoir.current_total_samples < reservoir.size):
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
                                     feats[i],
-                                    softmax[i],
-                                    loss[i])
+                                    )
 
                 reservoir.add_sample(age[i], i_d[i], sample_object, True)
                 times += 1
@@ -567,8 +527,7 @@ def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
     majority_group_dict = reservoir.group_dict[reservoir.majority_group]
     
     n_size = reservoir.count_k_i[reservoir.majority_group]
-
-    # random subset of size 1000 (or less)
+    
     if n_size > 1000:
         n_size = 1000
     
@@ -889,6 +848,10 @@ if __name__ == "__main__":
     
     
     print("end of main")
+    
+    
+
+    
     
     
 
