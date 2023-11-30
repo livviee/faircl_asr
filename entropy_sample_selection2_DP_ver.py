@@ -639,6 +639,123 @@ def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
     
     return selected_id, selected_object
     
+def find_min_dist_sample_in_majority_group2(reservoir, n_diff, asr):
+    
+    majority_group_dict = reservoir.group_dict[reservoir.majority_group]
+    
+    n_size = reservoir.count_k_i[reservoir.majority_group]
+    
+    if n_size > 1000:
+        n_size = 1000
+    
+    majority_group_dict = random_subset_of_dict(majority_group_dict, n_size)
+    
+    cos_sim= torch.nn.CosineSimilarity(dim=1)
+    
+    two_combis = list(itertools.combinations(majority_group_dict.values(), 2))
+    
+    set_length_not_matching = set()
+    
+    for set_ in two_combis:
+                
+        feature1 = set_[0].feats.squeeze().to(asr.device)
+        feature2 = set_[1].feats.squeeze().to(asr.device)
+        
+        feature1_length = feature1.shape[0]
+        feature2_length = feature2.shape[0]
+        
+        
+        if feature1_length > feature2_length:
+            feature1 = feature1.narrow(0,0,feature2_length)
+        elif feature1_length < feature2_length:
+            feature2 = feature2.narrow(0,0,feature1_length)
+        
+        similarity = cos_sim(feature1, feature2)
+
+        if not isinstance(set_[0].similarity, int) and not isinstance(similarity, int):
+            if (set_[0].similarity.shape[0] > similarity.shape[0]):
+                set_[0].similarity = set_[0].similarity[:similarity.shape[0]]
+                set_[0].distance = set_[0].distance[:similarity.shape[0]]
+            elif (set_[0].similarity.shape[0] < similarity.shape[0]):
+                similarity = similarity[:set_[0].similarity.shape[0]]
+         
+        with torch.no_grad():
+            distance = 1 - similarity
+        set_[0].add_similarity(similarity)
+        set_[1].add_similarity(similarity)
+        set_[0].add_distance(distance)
+        set_[1].add_distance(distance)
+    
+    id_list = list(majority_group_dict.keys())
+    object_list = list(majority_group_dict.values())
+
+    similarity_list = list()
+    
+    with torch.no_grad():
+        for i in range(len(object_list)):
+            if not isinstance(object_list[i].similarity, int):
+                sim = torch.sum(object_list[i].similarity)
+            else:
+                sim = 0
+            similarity_list.append(sim)
+        
+        sum_similarity = sum(similarity_list)
+    
+        if sum_similarity != 0:
+            prob_list = [val / sum_similarity for val in similarity_list]
+        else:
+            print("\n\n\n sum_similarity == 0 -> random dropping \n\n\n")
+            prob = 1 / len(majority_group_dict)
+            prob_list = [prob] * len(majority_group_dict)
+
+    prob_list_ = list()
+    
+    random_choices = list(WeightedRandomSampler(weights=prob_list,
+                                                num_samples=n_diff,
+                                                replacement=False))
+
+    selected_id = list()
+    selected_object = list()
+    
+    for i in random_choices:
+        selected_id.append(id_list[i])
+        selected_object.append(object_list[i])
+
+    
+    """
+    # find sample with minimum distance : no randomness
+    distance_list = list()
+    #dist_list = list() # for debugging
+
+        
+    for i in range(len(object_list)):
+        torch.sum(1-object_list[i].distance)
+        distance_list.append()
+        #dist_list.append(torch.sum(object_list[i].distance).detach().cpu()) # for debugging
+    
+    
+    #print("distance list")
+    #print(dist_list)
+    #print("\n\n")
+    
+    min_idx = distance_list.index(min(distance_list))
+    min_dist_id = id_list[min_idx]
+    
+    #print("\nmin dist index: ", str(min_idx), " id: ", min_dist_id)
+    """
+    
+    # reset distances
+    for sample_object in object_list:
+        sample_object.distance = 0
+        
+    # reset similarites
+    for sample_object in object_list:
+        sample_object.similarity = 0
+    
+    
+    return selected_id, selected_object
+
+
 
 def entropy_based_data_selection(asr, size, attribute, train_loader, csv_file):
     """
