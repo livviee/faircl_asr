@@ -59,8 +59,8 @@ ckpt_interval_minutes: 10 # save checkpoint every N min
 # With DDP batch_size is multiplied by N jobs
 ## Must be 6 per GPU to fit 16GB of VRAM
 # Must be 8 per GPU to fit 32GB of VRAM
-batch_size: 4
-test_batch_size: 4
+batch_size: 32
+test_batch_size: 32
 num_workers: 2 # 2 is better if the server is busy
 dataloader_num_workers: !ref <num_workers>
 test_num_workers: !ref <num_workers>
