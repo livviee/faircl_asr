@@ -86,7 +86,7 @@ character_coverage: 1.0
 #dnn_neurons: 1024 # large model
 dnn_neurons: 768 # base model
 wav2vec_output_dim: !ref <dnn_neurons>
-freeze_wav2vec: True # update transformer
+freeze_wav2vec: True # True for post-processing, False for in-processing
 freeze_feature_extractor: True # freeze feature extractor
 dropout: 0.15
 
