@@ -158,7 +158,7 @@ class ASR(sb.core.Brain):
             wandb.log({"Training loss": loss})
             
             with self.no_sync(not should_step):
-                (loss / self.grad_accumulation_factor).backward() # 여기서 문제
+                (loss / self.grad_accumulation_factor).backward()
                 
                 
             if should_step: ## accumulation done
