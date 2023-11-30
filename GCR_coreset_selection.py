@@ -2,6 +2,7 @@
 
 import sys
 import torch
+import torch.nn as nn
 import logging
 import speechbrain as sb
 import torchaudio
@@ -17,8 +18,41 @@ from mySchedulers import MyIntervalScheduler
 #from speechbrain.tokenizers.SentencePiece import SentencePiece
 #from pyctcdecode import build_ctcdecoder
 
-logger = logging.getLogger(__name__)
+import random
+import csv
+from speechbrain.dataio.dataset import DynamicItemDataset
 
+class ReplayBuffer:
+    def __init__(self, buffer_size):
+        self.buffer_size = buffer_size
+        self.buffer = []
+
+    def read_buffer(self):
+        if not os.path.exists(file_name):
+            open(file_name, 'w').close()
+
+        with open(file_name, mode='r', newline='') as file:
+            reader = csv.reader(file)
+
+        for row in reader:
+            self.buffer.append(row)
+
+    def add_data(self, data):
+        if len(self.buffer) + len(data) > self.buffer_size:
+            self.buffer = self.buffer[len(data):]  # Remove oldest data
+        self.buffer.extend(data)
+        self.write_buffer_to_csv()
+
+    def write_buffer_to_csv(self, file_name='replay_buffer.csv'):
+        with open(file_name, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            for item in self.buffer:
+                writer.writerow(item.tolist() if isinstance(item, torch.Tensor) else item)
+
+    def sample_data(self, sample_size):
+        return random.sample(self.buffer, min(sample_size, len(self.buffer)))
+
+logger = logging.getLogger(__name__)
 
 # Define training procedure
 
@@ -42,37 +76,71 @@ class ASR(sb.core.Brain):
 
         return p_ctc, wav_lens
 
+    ###GCR begin~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def supcon_loss(self, x, y, A, theta, omega):
         P_y = [item for item in A if item[1] == y]  # Positive examples
         numerator = sum(torch.exp(omega(theta(dot_x)) @ omega(theta(x))) for dot_x, dot_y, dot_z in P_y)
         denominator = sum(torch.exp(omega(theta(bar_x)) @ omega(theta(x))) for bar_x, bar_y, bar_z in A)
         return numerator / len(P_y) / denominator
     
-    def GCR_loss(self, theta, D_t, X_t_minus_1, C_t, W_X_t_minus_1, W_C_t, alpha, beta, gamma, l, omega, h):
-        # First term: Prediction loss for current task data
-        loss_pred = sum(l(y, f_theta(theta, x)) for x, y in D_t)
+    def GCRAlgorithm(D, theta, alpha, beta, gamma, lambda_, learning_rate, batch_size, buffer_size, tolerance):
+        X, WX, n = set(), [], 0
+        for Dt in D:  # D is a list of tasks, each task Dt is a set of (x, y) pairs
+            Ct, nt = set(), 0  # Initialize Candidate Pool for the task
 
-        # Combined data from replay buffer and current task candidate pool
-        combined_data = X_t_minus_1 + C_t
-        combined_weights = W_X_t_minus_1 + W_C_t
+            for (x, y) in Dt:
+                nt += 1
+                n += 1
 
-        # Second term: Distillation loss
-        loss_distill = sum(alpha * w0 * torch.norm(z0 - h(theta, x0))**2 
-                        for (x0, y0, z0, w0) in zip(combined_data, combined_weights))
+                adaptive_samples = AdaptiveSampling(X, Ct, nt, n)  # Implement this function
+                xaug = Augment(x)  # Implement Augment function
+                z = model_logit_outputs(theta, xaug)  # Implement this function
+                theta = update_parameters(theta, xaug, y, adaptive_samples, alpha, beta, gamma, learning_rate)  # Implement this function
+                Ct = Reservoir(Ct, (x, y, z), buffer_size)  # Implement Reservoir sampling
+                X, WX = self.gradprox(X.union(Ct), WX + [1], theta, lambda_, buffer_size, tolerance)
 
-        # Third term: Label loss
-        loss_label = sum(beta * hat_w * l(hat_y, f_theta(theta, hat_x)) 
-                        for (hat_x, hat_y, hat_z, hat_w) in zip(combined_data, combined_weights))
+            return X, WX
 
-        # Fourth term: Supervised contrastive loss
-        loss_supcon = sum(gamma * dot_w * self.supcon_loss(dot_x, dot_y, combined_data, theta, omega) 
-                        for (dot_x, dot_y, dot_z, dot_w) in zip(combined_data, combined_weights))
+    def gradprox(self, D, WD, lambda_, K, tolerance):
+        theta = self.parameters()
 
-        # Total loss
-        total_loss = loss_pred + loss_distill + loss_label + loss_supcon
-        return total_loss
+        Y = len(set([label for _, label, _ in D]))  # Assuming D = [(xi, yi, zi)]
+        D_partitioned = partition_by_label(D, Y)   # Implement this function
+        WD_partitioned = partition_by_label(WD, Y) # Similar to above, partition weights by label
+        X, WX = set(), []
 
+        for y in range(1, Y + 1):
+            ky = K // Y
+            Xy, WXy = set(), []
+            r = compute_residuals(D_partitioned[y], WD_partitioned[y], Xy, WXy, lambda_, loss, theta) # Implement this
+            
+            while len(Xy) <= ky and compute_lsub(D_partitioned[y], WD_partitioned[y], Xy, WXy, lambda_, loss, theta) >= tolerance:
+                e = np.argmax(r)
+                Xy.add(e)
+                WXy = compute_optimal_weights(D_partitioned[y], WD_partitioned[y], Xy, lambda_, loss, theta) # Implement this
+                r = compute_residuals(D_partitioned[y], WD_partitioned[y], Xy, WXy, lambda_, loss, theta)
 
+                X.update(Xy)
+                WX.extend(WXy)
+
+        return X, WX
+
+    def partition_by_label(self, D, Y):
+        return {y: [(xi, yi, zi) for xi, yi, zi in D if yi == y] for y in range(1, Y + 1)}
+
+    def compute_residuals(self, Dy, WDy, Xy, WXy, lambda_, placeholder_function, theta):
+        # Implement
+        return []
+
+    def compute_lsub(self, Dy, WDy, Xy, WXy, lambda_, placeholder_function, theta):
+        # Implement
+        return 0
+
+    def compute_optimal_weights(self, Dy, WDy, Xy, lambda_, placeholder_function, theta):
+        # Implement
+        return []
+    ##GCR end~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC) given predictions and targets."""
 
