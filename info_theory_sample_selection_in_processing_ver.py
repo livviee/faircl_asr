@@ -246,6 +246,8 @@ class ASR(sb.core.Brain):
             csv_file_ = dir_name + "/" + without_ext + "_EPOCH_" + str(epoch) + "." + ext
             create_csv(csv_file_, self.reservoir)
             
+            self.reservoir.reinit()
+            
         else:
             stage_stats["CER"] = self.cer_metric.summarize("error_rate")
             stage_stats["WER"] = self.wer_metric.summarize("error_rate")
