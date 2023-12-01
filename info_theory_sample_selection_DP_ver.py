@@ -213,6 +213,20 @@ class Reservoir:
         self.group_running_std_loss = {i:0.0 for i in self.groups}
         
     
+    def reinit(self):
+        self.count_k_i = {i:0 for i in self.groups}
+        self.current_total_samples = 0
+        self.group_dict = {i:dict() for i in self.groups}
+        self.max_M_sample = None
+        self.majority_group = None
+        self.running_M = dict()
+        self.running_mean_M = None
+        self.running_std_M = None
+        self.group_running_loss = {i:dict() for i in self.groups}
+        self.group_running_mean_loss = {i:0.0 for i in self.groups}
+        self.group_running_std_loss = {i:0.0 for i in self.groups}
+        
+        
     def find_majority_group(self):
         self.majority_group = max(self.count_k_i, key=self.count_k_i.get)
         return self.majority_group
@@ -817,7 +831,6 @@ if __name__ == "__main__":
     
     
     print("end of main")
-    
     
 
     
