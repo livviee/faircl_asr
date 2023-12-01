@@ -107,15 +107,11 @@ def dataio_prepare(hparams, tokenizer):
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")
     @sb.utils.data_pipeline.provides(
-        "tokens_list", "tokens_bos", "tokens_eos", "tokens"
+        "tokens_list", "tokens"
     )
     def text_pipeline(wrd):
         tokens_list = tokenizer.sp.encode_as_ids(wrd)
         yield tokens_list
-        tokens_bos = torch.LongTensor([hparams["bos_index"]] + (tokens_list))
-        yield tokens_bos
-        tokens_eos = torch.LongTensor(tokens_list + [hparams["eos_index"]])
-        yield tokens_eos
         tokens = torch.LongTensor(tokens_list)
         yield tokens
 
@@ -123,8 +119,7 @@ def dataio_prepare(hparams, tokenizer):
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        datasets, ["id", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents",
-                   "sig", "tokens"],
+        datasets, ["id", "duration", "age", "gender", "sig", "tokens"],
     )
     return train_data, valid_data, test_data
     
@@ -168,13 +163,12 @@ def create_csv(csv_file, reservoir):
 
 #@dataclass        
 class Sample:
-    def __init__(self, id, duration, age, gender, accents,  
+    def __init__(self, id, duration, age, gender,  
                  softmax, loss, measure_M):
         self.id = id
         self.duration = duration
         self.age = age
         self.gender = gender
-        self.accents = accents
         
         self.softmax = softmax
         self.loss = loss
@@ -294,7 +288,6 @@ def make_sample_object(reservoir, group, batch, asr):
     duration = batch.duration[0]
     age = batch.age[0]
     gender = batch.gender[0]
-    accents = batch.accents[0]
     tokens, tokens_lens = batch.tokens
     
     with torch.no_grad(): 
@@ -314,7 +307,6 @@ def make_sample_object(reservoir, group, batch, asr):
                 duration, 
                 age, 
                 gender, 
-                accents, 
                 logits,
                 softmax,
                 loss,
@@ -336,7 +328,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
     duration = batch.duration
     age = batch.age
     gender = batch.gender
-    accents = batch.accents
     tokens, tokens_lens = batch.tokens
 
     with torch.no_grad():
@@ -370,7 +361,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                             duration[i].item(), 
                                             age[i], 
                                             gender[i], 
-                                            accents[i],
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -384,7 +374,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                     duration[i].item(), 
                                     age[i], 
                                     gender[i], 
-                                    accents[i],
                                     softmax[i],
                                     loss[i],
                                     measure_M)
@@ -415,7 +404,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                             duration[i].item(), 
                                             age[i], 
                                             gender[i], 
-                                            accents[i], 
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -429,7 +417,6 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                     duration[i].item(), 
                                     age[i], 
                                     gender[i], 
-                                    accents[i], 
                                     softmax[i],
                                     loss[i],
                                     measure_M)
@@ -462,7 +449,6 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
     duration = batch.duration
     age = batch.age
     gender = batch.gender
-    accents = batch.accents
 
     appended_num_list = list()
     
@@ -490,7 +476,6 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                             duration[i].item(), 
                                             age[i], 
                                             gender[i], 
-                                            accents[i], 
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -505,7 +490,6 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                     duration[i].item(), 
                                     age[i], 
                                     gender[i], 
-                                    accents[i], 
                                     softmax[i],
                                     loss[i],
                                     measure_M)
@@ -537,7 +521,6 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                             duration[i].item(), 
                                             age[i], 
                                             gender[i], 
-                                            accents[i], 
                                             softmax[i],
                                             loss[i],
                                             measure_M)
@@ -552,7 +535,6 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                                     duration[i].item(), 
                                     age[i], 
                                     gender[i], 
-                                    accents[i], 
                                     softmax[i],
                                     loss[i],
                                     measure_M)
