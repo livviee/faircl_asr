@@ -90,6 +90,7 @@ freeze_wav2vec: True # True for post-processing, False for in-processing
 freeze_feature_extractor: True # freeze feature extractor
 dropout: 0.15
 
+#=========================BATCH SIZE 32==========================
 total_step: 414725  # 33178 * 50 epoch / 4 grad_accumulation
 tenth_step: 41472   # scheduler warmup steps
 half_step: 207362
@@ -98,6 +99,17 @@ warmup_steps: !ref <half_step> # do not update optimizer
 freeze_steps: !ref <eighth_step> # only update linear layer
 
 anneal_rate: 0.99998555323
+
+#=========================BATCH SIZE 16==========================
+#total_step: 829437  # 66355 * 50 epoch / 4 grad_accumulation
+#tenth_step: 82943   # scheduler warmup steps
+#half_step: 414718
+#eighth_step: 103679
+#warmup_steps: !ref <half_step> # do not update optimizer
+#freeze_steps: !ref <eighth_step> # only update linear layer
+
+#anneal_rate: 0.99999277648
+#================================================================
 
 tenth_epoch: 5
 half_epoch: 25
