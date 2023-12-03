@@ -34,6 +34,7 @@ import math
 import numpy as np 
 import torch.nn as nn
 import gc
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -364,10 +365,16 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                 threshold = reservoir.running_mean_M + reservoir.running_std_M * lambda_ * gamma
                 
                 if measure_M > threshold:
-                    prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
+                    M_prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
                                     loc=reservoir.running_mean_M.detach().cpu().numpy(), 
                                     scale=reservoir.running_std_M.detach().cpu().numpy())
-            
+
+                    duration_prob = norm.cdf(x=duration[i].detach().cpu().numpy(), 
+                                    loc=asr.duration_mean, 
+                                    scale=asr.duration_std)
+                    
+                    prob = asr.M_coef * M_prob + asr.duration_coef * duration_prob                    
+    
                     if np.random.binomial(n=1, p=prob):
                         # replace samples
                         reservoir.delete_sample_with_least_M()
@@ -380,7 +387,7 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                             measure_M)
                         reservoir.add_sample(age[i], i_d[i], sample_object)
                         times += 1
-                        wandb_log(reservoir, measure_M, threshold, gamma)
+                        #wandb_log(reservoir, measure_M, threshold, gamma)
 
             elif init and times < reservoir.size:
                 measure_M = compute_measure_M(reservoir, age[i], loss[i], softmax[i], alpha, beta)
@@ -393,7 +400,7 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                     measure_M)
                 reservoir.add_sample(age[i], i_d[i], sample_object)
                 times += 1
-                wandb_log(reservoir, measure_M)
+                #wandb_log(reservoir, measure_M)
             elif init and times == reservoir.size:
                 break
                 
@@ -407,9 +414,15 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                 threshold = reservoir.running_mean_M + reservoir.running_std_M * lambda_ * gamma
                 
                 if measure_M > threshold:
-                    prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
+                    M_prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
                                     loc=reservoir.running_mean_M.detach().cpu().numpy(), 
                                     scale=reservoir.running_std_M.detach().cpu().numpy())
+
+                    duration_prob = norm.cdf(x=duration[i].detach().cpu().numpy(), 
+                                    loc=asr.duration_mean, 
+                                    scale=asr.duration_std)
+                    
+                    prob = asr.M_coef * M_prob + asr.duration_coef * duration_prob 
             
                     if np.random.binomial(n=1, p=prob):
                         # replace samples
@@ -423,7 +436,7 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                             measure_M)
                         reservoir.add_sample(gender[i], i_d[i], sample_object)
                         times += 1
-                        wandb_log(reservoir, measure_M, threshold, gamma)
+                        #wandb_log(reservoir, measure_M, threshold, gamma)
 
             elif init and times < reservoir.size:
                 measure_M = compute_measure_M(reservoir, gender[i], loss[i], softmax[i], alpha, beta)
@@ -436,7 +449,7 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, la
                                     measure_M)
                 reservoir.add_sample(gender[i], i_d[i], sample_object)
                 times += 1
-                wandb_log(reservoir, measure_M)
+                #wandb_log(reservoir, measure_M)
             elif init and times == reservoir.size:
                 break
     
@@ -479,9 +492,15 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 threshold = reservoir.running_mean_M + reservoir.running_std_M * lambda_ * gamma
                 
                 if measure_M > threshold:
-                    prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
+                    M_prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
                                     loc=reservoir.running_mean_M.detach().cpu().numpy(), 
                                     scale=reservoir.running_std_M.detach().cpu().numpy())
+
+                    duration_prob = norm.cdf(x=duration[i].detach().cpu().numpy(), 
+                                    loc=asr.duration_mean, 
+                                    scale=asr.duration_std)
+                    
+                    prob = asr.M_coef * M_prob + asr.duration_coef * duration_prob 
             
                     if np.random.binomial(n=1, p=prob):
                         # replace samples
@@ -496,7 +515,7 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                         reservoir.add_sample(age[i], i_d[i], sample_object)
                         times += 1
                         appended_num_list.append(i)
-                        wandb_log(reservoir, measure_M, threshold, gamma)
+                        #wandb_log(reservoir, measure_M, threshold, gamma)
 
             elif init and reservoir.size > reservoir.current_total_samples:
                 measure_M = compute_measure_M(reservoir, age[i], loss[i], softmax[i], alpha, beta)
@@ -510,7 +529,7 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 reservoir.add_sample(age[i], i_d[i], sample_object)
                 times += 1
                 appended_num_list.append(i)
-                wandb_log(reservoir, measure_M)
+                #wandb_log(reservoir, measure_M)
             elif init and reservoir.size == reservoir.current_total_samples:
                 break
                 
@@ -524,9 +543,15 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 threshold = reservoir.running_mean_M + reservoir.running_std_M * lambda_ * gamma
                 
                 if measure_M > threshold:
-                    prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
+                    M_prob = norm.cdf(x=measure_M.detach().cpu().numpy(), 
                                     loc=reservoir.running_mean_M.detach().cpu().numpy(), 
                                     scale=reservoir.running_std_M.detach().cpu().numpy())
+
+                    duration_prob = norm.cdf(x=duration[i].detach().cpu().numpy(), 
+                                    loc=asr.duration_mean, 
+                                    scale=asr.duration_std)
+                    
+                    prob = asr.M_coef * M_prob + asr.duration_coef * duration_prob 
             
                     if np.random.binomial(n=1, p=prob):
                         # replace samples
@@ -541,7 +566,7 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                         reservoir.add_sample(gender[i], i_d[i], sample_object)
                         times += 1
                         appended_num_list.append(i)
-                        wandb_log(reservoir, measure_M, threshold, gamma)
+                        #wandb_log(reservoir, measure_M, threshold, gamma)
 
             elif init and reservoir.size > reservoir.current_total_samples:
                 measure_M = compute_measure_M(reservoir, gender[i], loss[i], softmax[i], alpha, beta)
@@ -555,7 +580,7 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
                 reservoir.add_sample(gender[i], i_d[i], sample_object)
                 times += 1
                 appended_num_list.append(i)
-                wandb_log(reservoir, measure_M)
+                #wandb_log(reservoir, measure_M)
             elif init and reservoir.size == reservoir.current_total_samples:
                 break
             
@@ -820,7 +845,11 @@ if __name__ == "__main__":
                                              stage=sb.Stage.TRAIN, 
                                              **hparams["dataloader_options"])
     
-    
+    train_set = pd.read_csv(asr_brain.hparams.train_csv)
+    asr_brain.duration_mean = train_set["duration"].describe().mean()
+    asr_brain.duration_std = train_set["duration"].describe().std()
+    asr_brain.M_coef = asr_brain.hparams.M_coef
+    asr_brain.duration_coef = asr_brain.hparams.duration_coef
     
     size = hparams["reservoir_size"]
     attribute = "age"
@@ -831,12 +860,5 @@ if __name__ == "__main__":
     
     
     print("end of main")
-    
-
-    
-
-    
-    
-
     
     
