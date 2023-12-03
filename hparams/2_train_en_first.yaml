@@ -186,7 +186,7 @@ lr_annealing_model_0: !new:speechbrain.nnet.schedulers.IntervalScheduler
               {"steps": !ref <total_step>, "lr": !ref <decayed_lr>}]
 
 lr_annealing_model_Noam: !new:speechbrain.nnet.schedulers.NoamScheduler
-  lr_initial: 0.0000015
+  lr_initial: !ref <decayed_lr>
   n_warmup_steps: !ref <n_warmup_steps>
   model_size: !ref <dnn_neurons>
 
