@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""
-For in-processing method
-- Saveable reservoir -> not yet..
-- Uses DDP
-- with torch.no_grad() in sample selection
 
-Implementation of "Entropy-based Sample Selection for Online Continual Learning (2021)"
-https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9287846
-
-In order to find the minimum distance feature,
-cosine similarity of features was used instead of measuring direct distances.
-
-
-"""
 import sys
 import torch
 import logging
@@ -38,6 +25,7 @@ import numpy as np
 from torch.utils.data import WeightedRandomSampler
 import torch.nn as nn
 import pandas as pd
+from scipy.stats import norm
 #from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -347,6 +335,15 @@ def calculate_coreset_affinity(batch_grad, coreset_grad, asr):
         affinity[i] = cos_sim
     return affinity
 
+def calculate_duration_score(batch, asr):
+    duration_score = torch.zeros(len(batch.id)).to(asr.device)
+    duration = batch.duration
+    for i in range(len(batch.id)):
+        duration_prob = torch.Tensor([norm.cdf(x=duration[i].detach().cpu().numpy(), 
+                                loc=asr.duration_mean, 
+                                scale=asr.duration_std)]).to(asr.device)
+        duration_score[i] = duration_prob
+    return duration_score
 
 def select_top_k(measure_M, k, batch):
 
@@ -391,11 +388,12 @@ def find_coreset_candidates_for_batch(asr, batch, B_C, k=None, final=False):
     minibatch_similarity = calculate_minibatch_similarity(batch_grad, asr)
     sample_diversity = calculate_sample_diversity(batch_grad, asr)
     coreset_affinity = calculate_coreset_affinity(batch_grad, coreset_grad, asr)
-	
+    duration_score = calculate_duration_score(batch, asr)
+    
     if not final:
-        measure_M = minibatch_similarity + sample_diversity + asr.tau * coreset_affinity
+        measure_M = minibatch_similarity + sample_diversity + asr.tau * coreset_affinity + asr.duration_coef * duration_score
     else:
-        measure_M = minibatch_similarity + sample_diversity + asr.tau_star * coreset_affinity
+        measure_M = minibatch_similarity + sample_diversity + asr.tau_star * coreset_affinity + asr.duration_coef * duration_score
     
     top_2_ids = select_top_k(measure_M, 2, batch)
     if k is not None:
