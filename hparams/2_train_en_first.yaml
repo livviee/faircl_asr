@@ -86,6 +86,7 @@ half_step: 207362
 eighth_step: 51840
 warmup_steps: !ref <half_step> # do not update optimizer
 freeze_steps: !ref <eighth_step> # only update linear layer
+n_warmup_steps : 8294 # for Noam scheduler    33178 * 1 epoch / 4 grad_accumulation
 
 anneal_rate: 0.99998555323
 
@@ -184,9 +185,9 @@ lr_annealing_model_0: !new:speechbrain.nnet.schedulers.IntervalScheduler
               {"steps": !ref <half_step>, "lr": !ref <peak_lr>},
               {"steps": !ref <total_step>, "lr": !ref <decayed_lr>}]
 
-lr_annealing_model_2: !new:speechbrain.nnet.schedulers.NoamScheduler
-  lr_initial: !ref <peak_lr>
-  n_warmup_steps: !ref <warmup_steps>
+lr_annealing_model_Noam: !new:speechbrain.nnet.schedulers.NoamScheduler
+  lr_initial: 0.0000015
+  n_warmup_steps: !ref <n_warmup_steps>
   model_size: !ref <dnn_neurons>
 
 lr_annealing_model_3: !new:speechbrain.nnet.schedulers.CyclicCosineScheduler
