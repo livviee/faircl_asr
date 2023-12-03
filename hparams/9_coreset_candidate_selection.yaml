@@ -46,6 +46,7 @@ final_k: 10000 # final coreset size
 tau: 0.8 # coreset affinity
 tau_star: 1.5 # when selecting real coreset samples
 lambda_star: 0.125 # model update weight for selected samples
+duration_coef: 0.3
 
 reservoir_size: 100
 attribute: age
