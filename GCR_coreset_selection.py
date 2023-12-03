@@ -22,35 +22,7 @@ import random
 import csv
 from speechbrain.dataio.dataset import DynamicItemDataset
 
-class ReplayBuffer:
-    def __init__(self, buffer_size):
-        self.buffer_size = buffer_size
-        self.buffer = []
-
-    def read_buffer(self):
-        if not os.path.exists(file_name):
-            open(file_name, 'w').close()
-
-        with open(file_name, mode='r', newline='') as file:
-            reader = csv.reader(file)
-
-        for row in reader:
-            self.buffer.append(row)
-
-    def add_data(self, data):
-        if len(self.buffer) + len(data) > self.buffer_size:
-            self.buffer = self.buffer[len(data):]  # Remove oldest data
-        self.buffer.extend(data)
-        self.write_buffer_to_csv()
-
-    def write_buffer_to_csv(self, file_name='replay_buffer.csv'):
-        with open(file_name, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            for item in self.buffer:
-                writer.writerow(item.tolist() if isinstance(item, torch.Tensor) else item)
-
-    def sample_data(self, sample_size):
-        return random.sample(self.buffer, min(sample_size, len(self.buffer)))
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -77,68 +49,164 @@ class ASR(sb.core.Brain):
         return p_ctc, wav_lens
 
     ###GCR begin~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def supcon_loss(self, x, y, A, theta, omega):
-        P_y = [item for item in A if item[1] == y]  # Positive examples
-        numerator = sum(torch.exp(omega(theta(dot_x)) @ omega(theta(x))) for dot_x, dot_y, dot_z in P_y)
-        denominator = sum(torch.exp(omega(theta(bar_x)) @ omega(theta(x))) for bar_x, bar_y, bar_z in A)
-        return numerator / len(P_y) / denominator
+    #not used at the moment >> Contrastive loss minimizes distance between in class representations, but in ASR, there are no distinct classes >> maybe we can make some according to accents.
+    def l_supcon(self, x, y, A, theta, omega_theta):
+        """
+        Calculate the supervised contrastive loss as per Equation 6.
+        
+        :param x: Input sample.
+        :param y: Ground truth label for the input sample.
+        :param A: A set containing data points.
+        :param theta: Model parameters.
+        :param omega_theta: Feature extractor output function.
+        :return: Supervised contrastive loss value.
+        """
+        P_y = [(x_dot, y_dot, z_dot) for x_dot, y_dot, z_dot in A if y_dot == y]
+        #numerator = math.exp(omega_theta(x_dot) @ omega_theta(x)) for x_dot, y_dot, z_dot in P_y
+        denominator = sum(math.exp(omega_theta(x_bar) @ omega_theta(x)) for x_bar, y_bar, z_bar in A)
+        
+        #return 1 / abs(P_y) * (numerator / denominator).sum()
     
-    def GCRAlgorithm(D, theta, alpha, beta, gamma, lambda_, learning_rate, batch_size, buffer_size, tolerance):
-        X, WX, n = set(), [], 0
-        for Dt in D:  # D is a list of tasks, each task Dt is a set of (x, y) pairs
-            Ct, nt = set(), 0  # Initialize Candidate Pool for the task
+    def L_theta(self, Dt, Xt_Ct, alpha=0.01, beta=0.01, gamma=0.01):
+        """
+        Calculate the overall loss L(θ) as per Equation 5.
+        
+        :param theta: Model parameters.
+        :param Dt: Current task data.
+        :param Xt_Ct: Combined data from replay buffer (Xt-1) and current task candidate pool (Ct).
+        :param alpha, beta, gamma: Hyperparameters.
+        :param f_theta: Model's predicted probability distribution function.
+        :param h_theta: Model's logits output function.
+        :param l_supcon: Supervised contrastive loss function.
+        :return: Computed loss value.
+        """
+        predictions = self.compute_forward(Dt, sb.Stage.TRAIN)
+        with torch.no_grad():
+            loss = self.compute_objectives(predictions, Dt, sb.Stage.TRAIN)
 
-            for (x, y) in Dt:
-                nt += 1
-                n += 1
+        # Component (a) - Distillation Loss
+        for x, y, z, w in Xt_Ct:
+            loss += alpha * w * (z - self(x))**2
 
-                adaptive_samples = AdaptiveSampling(X, Ct, nt, n)  # Implement this function
-                xaug = Augment(x)  # Implement Augment function
-                z = model_logit_outputs(theta, xaug)  # Implement this function
-                theta = update_parameters(theta, xaug, y, adaptive_samples, alpha, beta, gamma, learning_rate)  # Implement this function
-                Ct = Reservoir(Ct, (x, y, z), buffer_size)  # Implement Reservoir sampling
-                X, WX = self.gradprox(X.union(Ct), WX + [1], theta, lambda_, buffer_size, tolerance)
+        # Component (b) - Label Loss
+        for x_hat, y_hat, z_hat, w_hat in Xt_Ct:
+            loss += beta * w_hat * self.compute_objective(predictions, (x_hat, y_hat), sb.Stage.VALID)
 
-            return X, WX
+        #no classes, maybe constrastive losses according to accents?
+        '''
+        # Component (c) - Supervised Contrastive Loss
+        for x_tilde, y_tilde, z_tilde, w_tilde in Xt_Ct:
+            loss += gamma * w_tilde * self.l_supcon(x_tilde, y_tilde, Xt_Ct, theta)
+        '''
+        loss.backward()
+
+        return loss
+    
+    def gcr_obj(self, D, WD, X, WX, lambda_):
+        L_sub_d = self.L_theta(D, WD) #should be gradients 
+        L_sub_r = self.L_theta(X, WX) #should be gradients
+
+        gcr_obj = torch.sqrt(((L_sub_d.sum() - L_sub_r.sum())**2).sum()) - (lambda_ * torch.sqrt((WX**2).sum()))
+        return gcr_obj
 
     def gradprox(self, D, WD, lambda_, K, tolerance):
         theta = self.parameters()
 
-        Y = len(set([label for _, label, _ in D]))  # Assuming D = [(xi, yi, zi)]
-        D_partitioned = partition_by_label(D, Y)   # Implement this function
-        WD_partitioned = partition_by_label(WD, Y) # Similar to above, partition weights by label
+        Y = len(D)
+        #D_partitioned = self.partition_by_accent(D)
+        #WD_partitioned = self.partition_by_accent(WD)
         X, WX = set(), []
 
         for y in range(1, Y + 1):
             ky = K // Y
             Xy, WXy = set(), []
-            r = compute_residuals(D_partitioned[y], WD_partitioned[y], Xy, WXy, lambda_, loss, theta) # Implement this
+            l_sub = self.gcr_obj(D, WD, Xy, WXy, lambda_)
+            r = l_sub #change to gradients
             
-            while len(Xy) <= ky and compute_lsub(D_partitioned[y], WD_partitioned[y], Xy, WXy, lambda_, loss, theta) >= tolerance:
-                e = np.argmax(r)
+            while len(Xy) <= ky and l_sub >= tolerance:
+                e = torch.argmax(r)
                 Xy.add(e)
-                WXy = compute_optimal_weights(D_partitioned[y], WD_partitioned[y], Xy, lambda_, loss, theta) # Implement this
-                r = compute_residuals(D_partitioned[y], WD_partitioned[y], Xy, WXy, lambda_, loss, theta)
+                WXy = 0#argmin l_sub >> Implement this
+                r = l_sub #change to gradients #same as line above
 
                 X.update(Xy)
                 WX.extend(WXy)
 
         return X, WX
 
-    def partition_by_label(self, D, Y):
-        return {y: [(xi, yi, zi) for xi, yi, zi in D if yi == y] for y in range(1, Y + 1)}
+    def partition_by_accent(self, D):
+        partitioned_data = {}
+        for item in D:
+            accent = item["accents_field"]  # Get the accent for the item
+            if accent not in partitioned_data:
+                partitioned_data[accent] = []
+            partitioned_data[accent].append(item)
+        return partitioned_data
 
-    def compute_residuals(self, Dy, WDy, Xy, WXy, lambda_, placeholder_function, theta):
-        # Implement
-        return []
+    def GCR_algorithm(self, D, theta, alpha, beta, gamma, lambda_, learning_rate, batch_size, buffer_size, tolerance):
+        # Initialize Replay Buffer
+        X = set()  # Replay Buffer
+        WX = {}  # Replay Buffer Weights
+        n = 0  # Sample Count
 
-    def compute_lsub(self, Dy, WDy, Xy, WXy, lambda_, placeholder_function, theta):
-        # Implement
-        return 0
+        for D_t in D:
+            # Initialize Candidate Pool
+            C_t = set()
+            n_t = 0  # Task Sample Count
 
-    def compute_optimal_weights(self, Dy, WDy, Xy, lambda_, placeholder_function, theta):
-        # Implement
-        return []
+            for (x, y) in D_t:
+                # Update Task Sample Count
+                n_t += 1
+                n += 1
+
+                # Adaptive Sampling (function definition not provided in the algorithm)
+                x_prime, y_prime, z_prime, w_prime = self.adaptive_sampling(X, WX, C_t, n_t, n)
+
+                # Data Augmentation >> Unused
+                #x_aug = self.augment(x)
+                #x_prime_aug = self.augment(x_prime)
+            
+                z = self.compute_forward(x, sb.Stage.VALID)
+
+                # Update Parameters
+                theta -= learning_rate * self.L_theta(Dt=D_t, Xt_Ct=(x_prime, y_prime, z_prime, w_prime))
+
+                # Update Candidate Pool (Reservoir function definition not provided in the algorithm)
+                C_t = Reservoir(C_t, (x, y, z), buffer_size)
+
+            X, WX = self.gradprox(X.union(C_t), WX.union({1}), theta, lambda_, buffer_size)
+
+    def adaptive_sampling(X, WX, C_t, n_t, n):
+        """
+        Adaptive Sampling Algorithm.
+
+        :param X: Replay Buffer
+        :param W: Replay Buffer weights
+        :param C_t: Candidate Pool
+        :param n_t: Task sample count
+        :param n: Entire sample count
+        :return: Data sample (x, y, z, w)
+        """
+        # Calculate probability
+        p = n_t / n
+
+        # Sample a random number
+        pf = random.uniform(0, 1)
+
+        # Choose from Candidate Pool or Replay Buffer based on probability
+        if pf <= p:
+            # Sample from Candidate Pool
+            i = random.randint(0, len(C_t) - 1)
+            x, y, z = C_t[i]
+            w = 1
+        else:
+            # Sample from Replay Buffer
+            i = random.randint(0, len(X) - 1)
+            x, y, z = X[i]
+            w = WX[i]
+
+        return x, y, z, w
+
     ##GCR end~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     
     def compute_objectives(self, predictions, batch, stage):
@@ -453,9 +521,16 @@ def dataio_prepare(hparams, tokenizer):
 
     sb.dataio.dataset.add_dynamic_item(datasets, text_pipeline)
 
+    # experiment accent field
+    @sb.utils.data_pipeline.takes("accents")
+    @sb.utils.data_pipeline.provides("accents_field")
+    def accents_pipeline(accents):
+        return accents
+    sb.dataio.dataset.add_dynamic_item(datasets, accents_pipeline)
+
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        datasets, ["id", "sig", "tokens_bos", "tokens_eos", "tokens"],
+        datasets, ["id", "sig", "tokens_bos", "tokens_eos", "tokens", "accents_field"],
     )
     return train_data, valid_data, test_data
     
