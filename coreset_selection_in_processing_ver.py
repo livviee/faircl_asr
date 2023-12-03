@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 import os
 import sys
@@ -16,6 +15,7 @@ import sentencepiece as spm
 import wandb
 from mySchedulers import MyIntervalScheduler
 from coreset_selection import *
+import pandas as pd
 #from speechbrain.core import *
 
 logger = logging.getLogger(__name__)
@@ -139,43 +139,15 @@ class ASR(sb.core.Brain):
             # on the forward pass
             
             B_C = next(self.coreset_loader) # 2
-            top_2_ids, top_k_ids = find_coreset_candidates_for_batch(self, batch, B_C, self.hparams.k) # select 2 / 30 out of 100
+            top_k_ids = find_coreset_candidates_for_batch(self, batch, B_C, self.hparams.k) # select 30 out of 100
 
-            add_to_coreset_candidate(self, top_2_ids)
+            add_to_coreset_candidate(self, top_k_ids)
             
             batch = concat_batch(batch, top_k_ids, B_C, self)
                         
-            with self.no_sync():
-                outputs = self.compute_forward(batch, sb.Stage.TRAIN)
-
-            p_ctc, feats, losses, loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
-                                    
-            #wandb.log({"Training loss": loss})
             
-            
-            with self.no_sync(not should_step):
-                (loss / self.grad_accumulation_factor).backward()
-                
-                
-            if should_step: ## accumulation done
-                if self.check_gradients(loss):
-                    if is_freeze_step:
-                        self.modules.wav2vec2.freeze = True
-                        
-                        for param in self.modules["wav2vec2"].parameters():
-                            param.requires_grad = False
-
-                    else:
-                        self.modules.wav2vec2.freeze = False
-                        
-                        for param in self.modules["wav2vec2"].parameters():
-                            param.requires_grad = True
-                    
-                    self.model_optimizer.step()
-                self.zero_grad()
-                self.optimizer_step += 1
         
-        self.on_fit_batch_end(batch, outputs, loss, should_step)
+        
         return loss.detach().cpu()
 
             
@@ -245,7 +217,9 @@ class ASR(sb.core.Brain):
             
             self.coreset_candidate = None
             
-                
+            if epoch == 50:
+                select_coreset_from_candidates(self, csv_file_)
+    
 
         else:
             stage_stats["CER"] = self.cer_metric.summarize("error_rate")
@@ -380,7 +354,8 @@ if __name__ == "__main__":
     
     
     # Create the datasets objects as well as tokenization and encoding
-    coreset_data, train_data, valid_data, test_data = dataio_prepare(hparams, tokenizer)
+    coreset_data, train_data, valid_data, test_data = dataio_prepare2(hparams, tokenizer)
+    # train_data ---> coreset candidates
 
     checkpointer = hparams["checkpointer"]
     
@@ -397,46 +372,38 @@ if __name__ == "__main__":
     
     asr_brain.lr_annealing_model = lr_annealing_model
 
-    # for selecting coreset candidates
-    coreset_loader = asr_brain.make_dataloader(coreset_data, 
+    # train loader
+    train_loader = asr_brain.make_dataloader(train_data, 
                                              stage=sb.Stage.TRAIN, 
-                                             **hparams["coresetloader_options"])
-    asr_brain.coreset_loader = iter(coreset_loader)
+                                             **hparams["dataloader_options"])
+    asr_brain.train_loader = iter(train_loader)
     
     
     # for selecting coreset out of candidates
-    #coreset_loader2 = asr_brain.make_dataloader(coreset_data, 
-    #                                         stage=sb.Stage.TRAIN, 
-    #                                         **hparams["coresetloader_options"])
-    #asr_brain.coreset_loader2 = iter(coreset_loader2)
+    coreset_loader2 = asr_brain.make_dataloader(coreset_data, 
+                                             stage=sb.Stage.TRAIN, 
+                                             **hparams["coresetloader_options2"])
+    asr_brain.coreset_loader2 = iter(coreset_loader2)
     
     
     
     #asr_brain.reservoir = Reservoir(asr_brain.hparams.reservoir_size, asr_brain.hparams.attribute)
-    asr_brain.coreset_candidate = None
+    asr_brain.real_coreset = None
     
     asr_brain.csv_file = asr_brain.hparams.selected_sample_csv
-    asr_brain.attribute = asr_brain.hparams.attribute
+    #asr_brain.attribute = asr_brain.hparams.attribute
     
     asr_brain.sample_selection = False
     asr_brain.tau = asr_brain.hparams.tau
+    asr_brain.tau_star = asr_brain.hparams.tau_star
     
-    asr_brain.fit(
-        asr_brain.hparams.epoch_counter,
-        train_data,
-        valid_data,
-        train_loader_kwargs=hparams["dataloader_options"],
-        valid_loader_kwargs=hparams["test_dataloader_options"],
-    )
+    train_set = pd.read_csv(asr_brain.hparams.train_csv)
+    asr_brain.duration_mean = train_set["duration"].describe().mean()
+    asr_brain.duration_std = train_set["duration"].describe().std()
+    asr_brain.duration_coef = asr_brain.hparams.duration_coef
     
     
-    # Test
-    asr_brain.evaluate(
-        test_data,
-        min_key="WER",
-        test_loader_kwargs=hparams["test_dataloader_options"],
-    )
+    select_coreset_from_candidates(asr_brain)
     
-
     
     
