@@ -35,6 +35,8 @@ alpha: 0.3
 beta: 0.3
 lambda_: 1.5
 lambda_star: 0.125 # model update weight for selected samples
+M_coef : 0.4
+duration_coef : 0.6
 
 reservoir_size: 10000
 attribute: age
