@@ -17,6 +17,7 @@ import wandb
 from mySchedulers import MyIntervalScheduler
 from info_theory_sample_selection_DP_ver import *
 from speechbrain.core import *
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +403,12 @@ if __name__ == "__main__":
     asr_brain.sample_selection = False
     asr_brain.lambda_star = asr_brain.hparams.lambda_star
     
+    train_set = pd.read_csv(asr_brain.hparams.train_csv)
+    asr_brain.duration_mean = train_set["duration"].describe().mean()
+    asr_brain.duration_std = train_set["duration"].describe().std()
+    asr_brain.M_coef = asr_brain.hparams.M_coef
+    asr_brain.duration_coef = asr_brain.hparams.duration_coef
+    
     asr_brain.fit(
         asr_brain.hparams.epoch_counter,
         train_data,
@@ -409,8 +416,8 @@ if __name__ == "__main__":
         train_loader_kwargs=hparams["dataloader_options"],
         valid_loader_kwargs=hparams["test_dataloader_options"],
     )
-
-
+    
+    
     # Test
     asr_brain.evaluate(
         test_data,
@@ -419,6 +426,7 @@ if __name__ == "__main__":
     )
     
 
+    
     
     
     
