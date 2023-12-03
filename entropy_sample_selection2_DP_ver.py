@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""
-FASTER & Multi-GPU Distributed Processing ver. - REMOVE & ADD IN BULK
 
-Implementation of "Entropy-based Sample Selection for Online Continual Learning (2021)"
+"""
+For post-processing method
+- Uses DP
+- with torch.no_grad() in sample selection
+
+For in-processing method
+- Saveable reservoir -> not yet..
+- Uses DDP
+- with torch.no_grad() in sample selection
+
+Inspired by "Entropy-based Sample Selection for Online Continual Learning (2021)"
 https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9287846
 
-In order to find the minimum distance feature,
+calculates distances within random subset of the majority group
+In order to measure distances,
 cosine similarity of features was used instead of measuring direct distances.
-
 
 """
 import sys
@@ -34,6 +42,8 @@ import os
 import numpy as np
 from torch.utils.data import WeightedRandomSampler
 import torch.nn as nn
+import pandas as pd
+import gc
 #from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -124,9 +134,8 @@ def dataio_prepare(hparams, tokenizer):
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        #csv: "ID", "duration", "wav-경로", "spk_id", "wrd", "age", "gender", "accents"
         datasets, ["id", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents",
-                   "sig", "tokens_bos", "tokens_eos", "tokens"],
+                   "sig", "tokens"],
     )
     return train_data, valid_data, test_data
     
@@ -147,8 +156,7 @@ def create_csv(csv_file, reservoir):
             csv_f, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL
         )
 
-        #csv_writer.writerow(["ID", "wav", "spk_id", "wrd", "age", "gender", "accents"])
-        csv_writer.writerow(["ID", "duration", "wav", "spk_id", "wrd", "age", "gender", "accents"])
+        csv_writer.writerow(["ID"])
         
         
         final_dict = reservoir.group_dict
@@ -158,13 +166,6 @@ def create_csv(csv_file, reservoir):
                 csv_writer.writerow(
                     [
                         sample_object.id,
-                        sample_object.duration,
-                        sample_object.wav,
-                        sample_object.spk_id,
-                        sample_object.wrd,
-                        sample_object.age,
-                        sample_object.gender,
-                        sample_object.accents
                     ]
                 )
     
@@ -179,24 +180,26 @@ def create_csv(csv_file, reservoir):
         
 #@dataclass        
 class Sample:
-    def __init__(self, id, duration, wav, spk_id, wrd, age, gender, accents, tokens_bos, tokens_eos, feats, softmax, loss):
+    def __init__(self, id, duration, age, gender, accents, feats, measure_M=None, distance=None, similarity=None):
         self.id = id
         self.duration = duration
-        self.wav = wav # path
-        self.spk_id = spk_id
-        self.wrd = wrd
         self.age = age
         self.gender = gender
         self.accents = accents
-        self.tokens_bos = tokens_bos
-        self.tokens_eos = tokens_eos
-        #self.tokens = tokens
         self.feats = feats
-        self.softmax = softmax
-        self.loss = loss
-        self.measure_M = 0
-        self.distance = 0
-        self.similarity = 0
+        
+        if measure_M is not None and distance is not None and similarity is not None:
+            self.measure_M = measure_M
+            self.distance = distance
+            self.similarity = similarity
+        else:    
+            self.measure_M = 0
+            self.distance = 0
+            self.similarity = 0
+    
+    def return_list(self):
+        return_list = [self.id, self.duration, self.age, self.gender, self.accents, self.feats, self.measure_M, self.distance, self.similarity]
+        return return_list
         
     def add_distance(self, distance_val):
         self.distance += distance_val
@@ -212,8 +215,9 @@ def dict_to_string(dictionary):
     string_representation = string_representation.rstrip(", ")
     return string_representation
 
+@sb.utils.checkpoints.register_checkpoint_hooks
 class Reservoir:
-    def __init__(self, size, attribute, cardinality=None, ):
+    def __init__(self, size, attribute, cardinality=None):
         
         if attribute == "age":
             self.groups = ["teens", "twenties", "thirties", "fourties", "fifties", "sixties", "seventies", "eighties", "nineties"]
@@ -235,8 +239,23 @@ class Reservoir:
         self.max_M_sample = None
         self.majority_group = None
         self.second_majority_group = None
-        
     
+    def load_group_dict(self, flattened_group_dict):
+        nested_group_dict = convert_nested(flattened_group_dict)
+        
+        for group, group_sample_dict in nested_group_dict.items():
+            for key, value in group_sample_dict.items():
+                self.group_dict[group][key] = Sample(*value)
+                
+    def reinit(self):
+        self.count_k_i = {i:0 for i in self.groups}
+        self.current_total_samples = 0
+        self.init_phase = True
+        self.group_dict = {i:dict() for i in self.groups}
+        self.max_M_sample = None
+        self.majority_group = None
+        self.second_majority_group = None
+        
     def find_majority_group(self):
         self.majority_group = max(self.count_k_i, key=self.count_k_i.get) # max값 갖는 group중 dict 의 앞부분에 있는 group 선택
         return self.majority_group
@@ -275,24 +294,81 @@ class Reservoir:
     def delete_sample(self, group, i_d):
         self.group_dict[group].pop(i_d)
         self.update_count_k_i()
+        gc.collect()
     
     def delete_samples(self, group, i_ds):
         for i_d in i_ds:
             self.group_dict[group].pop(i_d)
         self.update_count_k_i()
+        gc.collect()
     
-    def add_sample(self, group, i_d, sample_object):
+    def add_sample(self, group, i_d, sample_object, update=True):
         self.group_dict[group][i_d] = sample_object
-        self.update_count_k_i()
+        if update:
+            self.update_count_k_i()
         
-    def __str__(self):
-        info = "attribute: " + self.attribute +\
-                "\ncount_k_i: " + self.count_k_i +\
-                "\ncardinality: " + self.cardinality +\
-                "\nsize (current saved samples): " + self.size +\
-                "\ngroup_dict: " + dict_to_string(self.group_dict) +\
-                "\nmax_M_sample: " + dict_to_string(self.max_M_sample)
-        return info
+        
+    @sb.utils.checkpoints.mark_as_saver
+    def _save(self, path):
+        group_dict = {i:dict() for i in self.groups}
+        
+        for group, group_sample_dict in self.group_dict.items():
+            for key, value in group_sample_dict.items():
+                group_dict[group][key] = value.return_list()
+        
+        #flattened_group_dict = pd.json_normalize(group_dict, sep='#').to_dict(orient='records')[0]
+        
+        save_dict = {
+            "count_k_i": self.count_k_i,
+            "init_phase": self.init_phase,
+            #"group_dict": group_dict,
+            "max_M_sample": self.max_M_sample,
+            "majority_group": self.majority_group,
+            "second_majority_group": self.second_majority_group,
+        }
+        
+        #print(save_dict)
+        
+        
+        with open(path, "w") as w:
+            w.write(yaml.dump(save_dict, sort_keys=False)) # 여기서 group_dict를 저장을 못한다..
+            
+        #print("yaml written!!")
+        
+                
+
+    @sb.utils.checkpoints.mark_as_loader
+    def _recover(self, path, end_of_epoch, device):
+        with open(path) as f:
+            save_dict = yaml.safe_load(f)
+        self.count_k_i = save_dict["count_k_i"]
+        self.init_phase = save_dict["init_phase"]
+        #self.load_group_dict(save_dict["group_dict"])
+        self.max_M_sample = save_dict["max_M_sample"]
+        self.majority_group = save_dict["majority_group"]
+        self.second_majority_group = save_dict["second_majority_group"]
+        
+        
+        
+
+def insert(dct, lst):
+    for x in lst[:-2]:
+        dct[x] = dct = dct.get(x, dict())
+    dct.update({lst[-2]: lst[-1]})
+    
+def convert_nested(dct):
+    # empty dict to store the result
+    result = dict()
+ 
+    # create an iterator of lists 
+    # representing nested or hierarchical flow
+    lists = ([*k.split("#"), v] for k, v in dct.items())
+ 
+    # insert each list into the result
+    for lst in lists:
+        insert(result, lst)
+    return result
+
     
 def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_diff=None):
         
@@ -307,27 +383,15 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
     
     i_d = batch.id
     duration = batch.duration
-    path = batch.wav
-    spk_id = batch.spk_id
-    wrd = batch.wrd
     age = batch.age
     gender = batch.gender
     accents = batch.accents
-    tokens_bos, _ = batch.tokens_bos
-    tokens_eos, _ = batch.tokens_eos
     
     tokens, tokens_lens = batch.tokens
 
     with torch.no_grad():
         # Forward pass
         feats = asr.modules.wav2vec2(wavs, wav_lens)
-        #feats = feats.to(wavs.device)
-        logits = asr.modules.ctc_lin(feats)
-        softmax = asr.hparams.log_softmax(logits) # p_ctc
-        
-        # Evaluate
-        loss = asr.hparams.ctc_cost(softmax, tokens, wav_lens, tokens_lens)
-    
     
     if attribute == "age":
         for i in range(batch_size):
@@ -336,17 +400,10 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
             elif ((not init) and times < prev_times + n_diff) or (init and times < reservoir.size):
                 reservoir.group_dict[age[i]][i_d[i]] = Sample(i_d[i],
                                                             duration[i].item(), 
-                                                            path[i], 
-                                                            spk_id[i], 
-                                                            wrd[i], 
-                                                            age[i], 
                                                             gender[i], 
                                                             accents[i], 
-                                                            tokens_bos[i], 
-                                                            tokens_eos[i], 
                                                             feats[i],
-                                                            softmax[i],
-                                                            loss[i])
+                                                            )
                 times += 1
             elif ((not init) and times == prev_times + n_diff) or (init and times == reservoir.size):
                 break
@@ -358,17 +415,11 @@ def append_batch_to_group_dict(times, batch, reservoir, asr, attribute, init, n_
             elif (not init) or (init and times < reservoir.size):
                 reservoir.group_dict[gender[i]][i_d[i]] = Sample(i_d[i],
                                                             duration[i].item(), 
-                                                            path[i], 
-                                                            spk_id[i], 
-                                                            wrd[i], 
                                                             age[i], 
                                                             gender[i], 
                                                             accents[i], 
-                                                            tokens_bos[i], 
-                                                            tokens_eos[i], 
                                                             feats[i],
-                                                            softmax[i],
-                                                            loss[i])
+                                                            )
                 times += 1
             elif times == reservoir.size:
                 break
@@ -384,21 +435,17 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
     
     attribute = asr.attribute
     n_diff = asr.n_diff
-    #prev_total_samples = asr.reservoir.current_total_samples
     
-    batch = batch.to(asr.device)
     batch_size = len(batch.id)
     
     i_d = batch.id
     duration = batch.duration
-    path = batch.wav
-    spk_id = batch.spk_id
-    wrd = batch.wrd
     age = batch.age
     gender = batch.gender
     accents = batch.accents
-    tokens_bos, _ = batch.tokens_bos
-    tokens_eos, _ = batch.tokens_eos
+
+    
+    appended_num_list = list()
     
     times = 0
     
@@ -409,20 +456,15 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
             elif ((not init) and times < n_diff) or (init and reservoir.current_total_samples < reservoir.size):
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    tokens_bos[i], 
-                                    tokens_eos[i], 
                                     feats[i],
-                                    softmax[i],
-                                    loss[i])
-                #reservoir.group_dict[age[i]][i_d[i]] = sample_object
-                reservoir.add_sample(age[i], i_d[i], sample_object)
+                                    )
+
+                reservoir.add_sample(age[i], i_d[i], sample_object, True)
                 times += 1
+                appended_num_list.append(i)
             elif ((not init) and times == n_diff) or (init and reservoir.current_total_samples == reservoir.size):
                 break
                 
@@ -433,24 +475,19 @@ def append_batch_to_group_dict2(batch, feats, softmax, loss, asr):
             elif ((not init) and times < n_diff) or (init and reservoir.current_total_samples < reservoir.size):
                 sample_object = Sample(i_d[i],
                                     duration[i].item(), 
-                                    path[i], 
-                                    spk_id[i], 
-                                    wrd[i], 
                                     age[i], 
                                     gender[i], 
                                     accents[i], 
-                                    tokens_bos[i], 
-                                    tokens_eos[i], 
                                     feats[i],
-                                    softmax[i],
-                                    loss[i])
-                #reservoir.group_dict[gender[i]][i_d[i]] = sample_object
-                reservoir.add_sample(gender[i], i_d[i], sample_object)
+                                    )
+
+                reservoir.add_sample(age[i], i_d[i], sample_object, True)
                 times += 1
+                appended_num_list.append(i)
             elif ((not init) and times == n_diff) or (init and reservoir.current_total_samples == reservoir.size):
                 break
     
-    return times
+    return times, appended_num_list
 
 def init_reservoir(reservoir, asr, train_loader):
     
@@ -473,10 +510,29 @@ def init_reservoir(reservoir, asr, train_loader):
     
     return train_loader
 
+def random_subset_of_dict(dictionary, n_size):
+    
+    new_dict = dictionary
+    random_choices = random.sample(dictionary.keys(), k=n_size)
+
+    for key in dictionary.keys():
+        if key not in random_choices:
+            new_dict.pop(key)
+    
+    return new_dict
+    
 
 def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
     
     majority_group_dict = reservoir.group_dict[reservoir.majority_group]
+    
+    n_size = reservoir.count_k_i[reservoir.majority_group]
+    
+    if n_size > 1000:
+        n_size = 1000
+    
+    majority_group_dict = random_subset_of_dict(majority_group_dict, n_size)
+    
     cos_sim= torch.nn.CosineSimilarity(dim=1)
     cos_sim = nn.DataParallel(cos_sim)
     
@@ -507,8 +563,8 @@ def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
             elif (set_[0].similarity.shape[0] < similarity.shape[0]):
                 similarity = similarity[:set_[0].similarity.shape[0]]
          
-        
-        distance = 1 - similarity
+        with torch.no_grad():
+            distance = 1 - similarity
         set_[0].add_similarity(similarity)
         set_[1].add_similarity(similarity)
         set_[0].add_distance(distance)
@@ -519,21 +575,22 @@ def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
 
     similarity_list = list()
     
-    for i in range(len(object_list)):
-        if not isinstance(object_list[i].similarity, int):
-            sim = torch.sum(object_list[i].similarity)
+    with torch.no_grad():
+        for i in range(len(object_list)):
+            if not isinstance(object_list[i].similarity, int):
+                sim = torch.sum(object_list[i].similarity)
+            else:
+                sim = 0
+            similarity_list.append(sim)
+        
+        sum_similarity = sum(similarity_list)
+    
+        if sum_similarity != 0:
+            prob_list = [val / sum_similarity for val in similarity_list]
         else:
-            sim = 0
-        similarity_list.append(sim)
-    
-    sum_similarity = sum(similarity_list)
-    
-    if sum_similarity != 0:
-        prob_list = [val / sum_similarity for val in similarity_list]
-    else:
-        print("\n\n\n sum_similarity == 0 -> random dropping \n\n\n")
-        prob = 1 / len(majority_group_dict)
-        prob_list = [prob] * len(majority_group_dict)
+            print("\n\n\n sum_similarity == 0 -> random dropping \n\n\n")
+            prob = 1 / len(majority_group_dict)
+            prob_list = [prob] * len(majority_group_dict)
 
     prob_list_ = list()
     
@@ -582,6 +639,123 @@ def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
     
     return selected_id, selected_object
     
+def find_min_dist_sample_in_majority_group2(reservoir, n_diff, asr):
+    
+    majority_group_dict = reservoir.group_dict[reservoir.majority_group]
+    
+    n_size = reservoir.count_k_i[reservoir.majority_group]
+    
+    if n_size > 1000:
+        n_size = 1000
+    
+    majority_group_dict = random_subset_of_dict(majority_group_dict, n_size)
+    
+    cos_sim= torch.nn.CosineSimilarity(dim=1)
+    
+    two_combis = list(itertools.combinations(majority_group_dict.values(), 2))
+    
+    set_length_not_matching = set()
+    
+    for set_ in two_combis:
+                
+        feature1 = set_[0].feats.squeeze().to(asr.device)
+        feature2 = set_[1].feats.squeeze().to(asr.device)
+        
+        feature1_length = feature1.shape[0]
+        feature2_length = feature2.shape[0]
+        
+        
+        if feature1_length > feature2_length:
+            feature1 = feature1.narrow(0,0,feature2_length)
+        elif feature1_length < feature2_length:
+            feature2 = feature2.narrow(0,0,feature1_length)
+        
+        similarity = cos_sim(feature1, feature2)
+
+        if not isinstance(set_[0].similarity, int) and not isinstance(similarity, int):
+            if (set_[0].similarity.shape[0] > similarity.shape[0]):
+                set_[0].similarity = set_[0].similarity[:similarity.shape[0]]
+                set_[0].distance = set_[0].distance[:similarity.shape[0]]
+            elif (set_[0].similarity.shape[0] < similarity.shape[0]):
+                similarity = similarity[:set_[0].similarity.shape[0]]
+         
+        with torch.no_grad():
+            distance = 1 - similarity
+        set_[0].add_similarity(similarity)
+        set_[1].add_similarity(similarity)
+        set_[0].add_distance(distance)
+        set_[1].add_distance(distance)
+    
+    id_list = list(majority_group_dict.keys())
+    object_list = list(majority_group_dict.values())
+
+    similarity_list = list()
+    
+    with torch.no_grad():
+        for i in range(len(object_list)):
+            if not isinstance(object_list[i].similarity, int):
+                sim = torch.sum(object_list[i].similarity)
+            else:
+                sim = 0
+            similarity_list.append(sim)
+        
+        sum_similarity = sum(similarity_list)
+    
+        if sum_similarity != 0:
+            prob_list = [val / sum_similarity for val in similarity_list]
+        else:
+            print("\n\n\n sum_similarity == 0 -> random dropping \n\n\n")
+            prob = 1 / len(majority_group_dict)
+            prob_list = [prob] * len(majority_group_dict)
+
+    prob_list_ = list()
+    
+    random_choices = list(WeightedRandomSampler(weights=prob_list,
+                                                num_samples=n_diff,
+                                                replacement=False))
+
+    selected_id = list()
+    selected_object = list()
+    
+    for i in random_choices:
+        selected_id.append(id_list[i])
+        selected_object.append(object_list[i])
+
+    
+    """
+    # find sample with minimum distance : no randomness
+    distance_list = list()
+    #dist_list = list() # for debugging
+
+        
+    for i in range(len(object_list)):
+        torch.sum(1-object_list[i].distance)
+        distance_list.append()
+        #dist_list.append(torch.sum(object_list[i].distance).detach().cpu()) # for debugging
+    
+    
+    #print("distance list")
+    #print(dist_list)
+    #print("\n\n")
+    
+    min_idx = distance_list.index(min(distance_list))
+    min_dist_id = id_list[min_idx]
+    
+    #print("\nmin dist index: ", str(min_idx), " id: ", min_dist_id)
+    """
+    
+    # reset distances
+    for sample_object in object_list:
+        sample_object.distance = 0
+        
+    # reset similarites
+    for sample_object in object_list:
+        sample_object.similarity = 0
+    
+    
+    return selected_id, selected_object
+
+
 
 def entropy_based_data_selection(asr, size, attribute, train_loader, csv_file):
     """
@@ -791,6 +965,11 @@ if __name__ == "__main__":
     
     
     print("end of main")
+    
+    
+
+    
+    
     
 
     

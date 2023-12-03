@@ -15,8 +15,8 @@ import yaml
 import sentencepiece as spm
 import wandb
 from mySchedulers import MyIntervalScheduler
-from entropy_sample_selection2_DP_ver import *
-from speechbrain.core import *
+from coreset_selection import *
+#from speechbrain.core import *
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class ASR(sb.core.Brain):
     
         batch = batch.to(self.device)
         wavs, wav_lens = batch.sig
+        #tokens_bos, _ = batch.tokens_bos
         wavs, wav_lens = wavs.to(self.device), wav_lens.to(self.device)
         
         if stage == sb.Stage.TRAIN:
@@ -48,6 +49,7 @@ class ASR(sb.core.Brain):
         p_ctc, wav_lens, feats = predictions
         
         ids = batch.id
+        #tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
         tokens, tokens_lens = tokens.to(self.device), tokens_lens.to(self.device)
 
@@ -135,72 +137,17 @@ class ASR(sb.core.Brain):
         else:
             # This is mandatory because HF models have a weird behavior with DDP
             # on the forward pass
-            with self.no_sync():
-                outputs = self.compute_forward(batch, sb.Stage.TRAIN)
-
-            p_ctc, feats, losses, loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
-
-
-            if self.sample_selection:
-                # Entropy-based sample selection
-                with torch.no_grad():
-                    if not self.reservoir.init_phase and self.n_diff is None:
-                        self.n_diff = self.reservoir.count_k_i[self.reservoir.majority_group] - self.reservoir.count_k_i[self.reservoir.second_majority_group]
-
-                        if (self.n_diff == 0):
-                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group2(self.reservoir, 1, self)
-                        else:
-                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group2(self.reservoir, self.n_diff, self)
-                        
-                        if self.attribute == "age":
-                            min_dist_group = min_dist_objects[0].age
-                        elif self.attribute == "gender":
-                            min_dist_group = min_dist_objects[0].gender
-                            
-                        self.reservoir.delete_samples(min_dist_group, min_dist_ids)
-                    
-                    times, appended_num_list = append_batch_to_group_dict2(batch, feats, p_ctc, losses, self) # self.attribute, reservoir, asr
-                    
-                    if not self.reservoir.init_phase: 
-                        if times == self.n_diff:
-                            self.n_diff = None
-                        elif self.n_diff is not None:               
-                            self.n_diff -= times
-                    
-                weight = torch.ones(len(batch.id)).to(self.device)
-                for i in range(len(batch.id)):
-                    if i in appended_num_list:
-                        weight[i] = (1+self.lambda_star)
-                losses = losses * weight
-                loss = torch.mean(losses)
-                
-                        
-            wandb.log({"Training loss": loss})
             
-            
-            with self.no_sync(not should_step):
-                (loss / self.grad_accumulation_factor).backward()
-                
-                
-            if should_step: ## accumulation done
-                if self.check_gradients(loss):
-                    if is_freeze_step:
-                        self.modules.wav2vec2.freeze = True
-                        
-                        for param in self.modules["wav2vec2"].parameters():
-                            param.requires_grad = False
+            B_C = next(self.coreset_loader) # 2
+            top_k_ids = find_coreset_candidates_for_batch(self, batch, B_C, self.hparams.k) # select 30 out of 100
 
-                    else:
-                        self.modules.wav2vec2.freeze = False
+            add_to_coreset_candidate(self, top_k_ids)
+            
+            batch = concat_batch(batch, top_k_ids, B_C, self)
                         
-                        for param in self.modules["wav2vec2"].parameters():
-                            param.requires_grad = True
-                    
-                    self.model_optimizer.step()
-                self.zero_grad()
-                self.optimizer_step += 1
+            
         
-        self.on_fit_batch_end(batch, outputs, loss, should_step)
+        
         return loss.detach().cpu()
 
             
@@ -231,7 +178,7 @@ class ASR(sb.core.Brain):
                     self.model_optimizer, new_lr
                 )
             
-            wandb.log({"Learning rate": old_lr})
+            #wandb.log({"Learning rate": old_lr})
             
 
         
@@ -261,15 +208,19 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN:
             self.train_stats = stage_stats
             
-            # save csv file
+            # save coreset_candidate list to csv file
             dir_name, base_name = os.path.split(self.csv_file)
             without_ext, ext = base_name.split(".")
             
             csv_file_ = dir_name + "/" + without_ext + "_EPOCH_" + str(epoch) + "." + ext
-            create_csv(csv_file_, self.reservoir)
+            create_csv(csv_file_, self.coreset_candidate)
             
-            self.reservoir.reinit()
+            self.coreset_candidate = None
             
+            if epoch == 50:
+                select_coreset_from_candidates(self, csv_file_)
+    
+
         else:
             stage_stats["CER"] = self.cer_metric.summarize("error_rate")
             stage_stats["WER"] = self.wer_metric.summarize("error_rate")
@@ -322,10 +273,10 @@ class ASR(sb.core.Brain):
 
 if __name__ == "__main__":
 
-    wandb.init(project='In-process_Entropy_sample_selection')
+    #wandb.init(project='In-process_Entropy_sample_selection')
     
     #wandb.init(id="usual-armadillo-30", resume=True)
-    wandb.run.save()
+    #wandb.run.save()
     
         
     # Load hyperparameters file with command-line overrides
@@ -343,7 +294,7 @@ if __name__ == "__main__":
         "num_workers": hparams["num_workers"]
     }
     
-    wandb.config.update(args)
+    #wandb.config.update(args)
    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.empty_cache()
@@ -403,7 +354,8 @@ if __name__ == "__main__":
     
     
     # Create the datasets objects as well as tokenization and encoding
-    train_data, valid_data, test_data = dataio_prepare(hparams, tokenizer)
+    coreset_data, train_data, valid_data, test_data = dataio_prepare2(hparams, tokenizer)
+    # train_data ---> coreset candidates
 
     checkpointer = hparams["checkpointer"]
     
@@ -420,32 +372,49 @@ if __name__ == "__main__":
     
     asr_brain.lr_annealing_model = lr_annealing_model
 
+    # train loader
+    train_loader = asr_brain.make_dataloader(train_data, 
+                                             stage=sb.Stage.TRAIN, 
+                                             **hparams["dataloader_options"])
+    asr_brain.train_loader = iter(train_loader)
     
-    asr_brain.reservoir = Reservoir(asr_brain.hparams.reservoir_size, asr_brain.hparams.attribute)
-    asr_brain.n_diff = None
-   
+    
+    # for selecting coreset out of candidates
+    coreset_loader2 = asr_brain.make_dataloader(coreset_data, 
+                                             stage=sb.Stage.TRAIN, 
+                                             **hparams["coresetloader_options2"])
+    asr_brain.coreset_loader2 = iter(coreset_loader2)
+    
+    
+    
+    #asr_brain.reservoir = Reservoir(asr_brain.hparams.reservoir_size, asr_brain.hparams.attribute)
+    asr_brain.real_coreset = None
     
     asr_brain.csv_file = asr_brain.hparams.selected_sample_csv
-    asr_brain.attribute = asr_brain.hparams.attribute
-    asr_brain.lambda_star = asr_brain.hparams.lambda_star
+    #asr_brain.attribute = asr_brain.hparams.attribute
+    
     asr_brain.sample_selection = False
+    asr_brain.tau = asr_brain.hparams.tau
+    asr_brain.tau_star = asr_brain.hparams.tau_star
+    
+    select_coreset_from_candidates(asr_brain)
     
     
-    asr_brain.fit(
-        asr_brain.hparams.epoch_counter,
-        train_data,
-        valid_data,
-        train_loader_kwargs=hparams["dataloader_options"],
-        valid_loader_kwargs=hparams["test_dataloader_options"],
-    )
+    #asr_brain.fit(
+    #    asr_brain.hparams.epoch_counter,
+    #    train_data,
+    #    valid_data,
+    #    train_loader_kwargs=hparams["dataloader_options"],
+    #    valid_loader_kwargs=hparams["test_dataloader_options"],
+    #)
     
     
     # Test
-    asr_brain.evaluate(
-        test_data,
-        min_key="WER",
-        test_loader_kwargs=hparams["test_dataloader_options"],
-    )
+    #asr_brain.evaluate(
+    #    test_data,
+    #    min_key="WER",
+    #    test_loader_kwargs=hparams["test_dataloader_options"],
+    #)
     
 
     

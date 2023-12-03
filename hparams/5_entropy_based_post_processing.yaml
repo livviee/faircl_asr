@@ -1,11 +1,8 @@
-# Model: wav2vec2 + DNN + CTC
-# Augmentation: SpecAugment
-# ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: !PLACEHOLDER
+seed: 6666
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref /result/hubert_ctc_en_then_de/en/<seed>
+output_folder: !ref /home/CVoice_hubert_ctc/result/hubert_ctc_en/<seed>
 test_wer_file: !ref <output_folder>/wer_test.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -19,7 +16,7 @@ wav2vec2_hub: facebook/hubert-base-ls960
 wav2vec2_folder: !ref <save_folder>/hubert_checkpoint
 
 # Dataset prep parameters
-data_folder: !PLACEHOLDER # /data/cv-corpus-15.0-2023-09-08/de
+data_folder: /data/cv-corpus-15.0-2023-09-08/en
 train_tsv_file: !ref <data_folder>/train.tsv
 dev_tsv_file: !ref <data_folder>/dev.tsv
 test_tsv_file: !ref <data_folder>/test.tsv
@@ -28,7 +25,14 @@ language: en ####################################
 train_csv: !ref <save_folder>/train.csv
 valid_csv: !ref <save_folder>/dev.csv
 test_csv: !ref <save_folder>/test.csv
-skip_prep: False
+selected_sample_csv: !ref <save_folder>/selected_sample.csv ##############################################################
+skip_prep: True ###################################
+
+
+reservoir_size: 10000
+attribute: age
+lambda_star: 0.125
+sample_selection_epoch: 1
 
 
 # We remove utterance slonger than 10s in the train/dev/test sets as
@@ -36,14 +40,14 @@ skip_prep: False
 avoid_if_longer_than: 10.0
 
 # Training parameters
-number_of_epochs: 60 #50
+number_of_epochs: 50
 initial_lr: 0
 peak_lr: 0.00003
 decayed_lr: 0.0000015
 sorting: descending
 auto_mix_prec: False
 sample_rate: 16000
-ckpt_interval_minutes: 1 # save checkpoint every N min
+ckpt_interval_minutes: 10 # save checkpoint every N min
 
 # With data_parallel batch_size is split into N jobs
 # With DDP batch_size is multiplied by N jobs
@@ -51,7 +55,7 @@ ckpt_interval_minutes: 1 # save checkpoint every N min
 # Must be 8 per GPU to fit 32GB of VRAM
 batch_size: 32
 test_batch_size: 32
-num_workers: 4 # 2 is better if the server is busy
+num_workers: 2 # 2 is better if the server is busy
 dataloader_num_workers: !ref <num_workers>
 test_num_workers: !ref <num_workers>
 pin_memory: True
@@ -76,19 +80,30 @@ character_coverage: 1.0
 #dnn_neurons: 1024 # large model
 dnn_neurons: 768 # base model
 wav2vec_output_dim: !ref <dnn_neurons>
-freeze_wav2vec: False # update transformer
+freeze_wav2vec: True # update transformer
 freeze_feature_extractor: True # freeze feature extractor
 dropout: 0.15
 
+#=========================BATCH SIZE 32==========================
 total_step: 414725  # 33178 * 50 epoch / 4 grad_accumulation
 tenth_step: 41472   # scheduler warmup steps
 half_step: 207362
 eighth_step: 51840
 warmup_steps: !ref <half_step> # do not update optimizer
 freeze_steps: !ref <eighth_step> # only update linear layer
-n_warmup_steps : 8294 # for Noam scheduler    33178 * 1 epoch / 4 grad_accumulation
 
 anneal_rate: 0.99998555323
+
+#=========================BATCH SIZE 16==========================
+#total_step: 829437  # 66355 * 50 epoch / 4 grad_accumulation
+#tenth_step: 82943   # scheduler warmup steps
+#half_step: 414718
+#eighth_step: 103679
+#warmup_steps: !ref <half_step> # do not update optimizer
+#freeze_steps: !ref <eighth_step> # only update linear layer
+
+#anneal_rate: 0.99999277648
+#================================================================
 
 tenth_epoch: 5
 half_epoch: 25
@@ -157,10 +172,12 @@ log_softmax: !new:speechbrain.nnet.activations.Softmax
 
 ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
   blank_index: !ref <blank_index>
+  reduction: batch
 
 modules:
   wav2vec2: !ref <wav2vec2>
   ctc_lin: !ref <ctc_lin>
+
 
 model: !new:torch.nn.ModuleList
   - [!ref <wav2vec2>, !ref <ctc_lin>]
@@ -185,9 +202,9 @@ lr_annealing_model_0: !new:speechbrain.nnet.schedulers.IntervalScheduler
               {"steps": !ref <half_step>, "lr": !ref <peak_lr>},
               {"steps": !ref <total_step>, "lr": !ref <decayed_lr>}]
 
-lr_annealing_model_Noam: !new:speechbrain.nnet.schedulers.NoamScheduler
-  lr_initial: !ref <decayed_lr>
-  n_warmup_steps: !ref <n_warmup_steps>
+lr_annealing_model_2: !new:speechbrain.nnet.schedulers.NoamScheduler
+  lr_initial: !ref <peak_lr>
+  n_warmup_steps: !ref <warmup_steps>
   model_size: !ref <dnn_neurons>
 
 lr_annealing_model_3: !new:speechbrain.nnet.schedulers.CyclicCosineScheduler

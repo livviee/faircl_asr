@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+"""
+Train Extra epochs
+"""
 
-import os
 import sys
 import torch
 import logging
@@ -15,8 +17,6 @@ import yaml
 import sentencepiece as spm
 import wandb
 from mySchedulers import MyIntervalScheduler
-from entropy_sample_selection2_DP_ver import *
-from speechbrain.core import *
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,12 @@ logger = logging.getLogger(__name__)
 class ASR(sb.core.Brain):
     def compute_forward(self, batch, stage):
         """Forward computations from the waveform batches to the output probabilities."""
-    
+
         batch = batch.to(self.device)
         wavs, wav_lens = batch.sig
+        tokens_bos, _ = batch.tokens_bos
         wavs, wav_lens = wavs.to(self.device), wav_lens.to(self.device)
-        
+
         if stage == sb.Stage.TRAIN:
             if hasattr(self.hparams, "augmentation"):
                 wavs = self.hparams.augmentation(wavs, wav_lens)
@@ -40,19 +41,19 @@ class ASR(sb.core.Brain):
         logits = self.modules.ctc_lin(feats) # x
         p_ctc = self.hparams.log_softmax(logits)
 
-        return p_ctc, wav_lens, feats
+        return p_ctc, wav_lens
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC) given predictions and targets."""
 
-        p_ctc, wav_lens, feats = predictions
+        p_ctc, wav_lens = predictions
+        
         
         ids = batch.id
+        tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
-        tokens, tokens_lens = tokens.to(self.device), tokens_lens.to(self.device)
 
-        losses = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
-        loss = losses.mean()
+        loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
         
         if stage != sb.Stage.TRAIN:
             # Decode token terms to words
@@ -82,19 +83,18 @@ class ASR(sb.core.Brain):
             
             # Print at Validation stage
             
-            print("target / greedy predicted words:\n")
-            for i in range(2):
-                print(target_words[i])
-                print(predicted_words[i])
-                print("\n\n")
+            #print("target / greedy predicted words:\n")
+            #for i in range(2):
+            #    print(target_words[i])
+            #    print(predicted_words[i])
+            #    print("\n\n")
             
 
             self.wer_metric.append(ids, predicted_words, target_words)
             self.cer_metric.append(ids, predicted_words, target_words)
 
-        return p_ctc, feats, losses, loss
-    
-    
+        return loss
+
     def fit_batch(self, batch):
         """Train the parameters given a single batch in input"""
         
@@ -111,7 +111,8 @@ class ASR(sb.core.Brain):
             with torch.cuda.amp.autocast():
                 with self.no_sync():
                     outputs = self.compute_forward(batch, sb.Stage.TRAIN)
-                p_ctc, feats, losses, loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
+                loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
+
             with self.no_sync(not should_step):
                 self.scaler.scale(
                     loss / self.grad_accumulation_factor
@@ -138,46 +139,10 @@ class ASR(sb.core.Brain):
             with self.no_sync():
                 outputs = self.compute_forward(batch, sb.Stage.TRAIN)
 
-            p_ctc, feats, losses, loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
+            loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
 
-
-            if self.sample_selection:
-                # Entropy-based sample selection
-                with torch.no_grad():
-                    if not self.reservoir.init_phase and self.n_diff is None:
-                        self.n_diff = self.reservoir.count_k_i[self.reservoir.majority_group] - self.reservoir.count_k_i[self.reservoir.second_majority_group]
-
-                        if (self.n_diff == 0):
-                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group2(self.reservoir, 1, self)
-                        else:
-                            min_dist_ids, min_dist_objects = find_min_dist_sample_in_majority_group2(self.reservoir, self.n_diff, self)
-                        
-                        if self.attribute == "age":
-                            min_dist_group = min_dist_objects[0].age
-                        elif self.attribute == "gender":
-                            min_dist_group = min_dist_objects[0].gender
-                            
-                        self.reservoir.delete_samples(min_dist_group, min_dist_ids)
-                    
-                    times, appended_num_list = append_batch_to_group_dict2(batch, feats, p_ctc, losses, self) # self.attribute, reservoir, asr
-                    
-                    if not self.reservoir.init_phase: 
-                        if times == self.n_diff:
-                            self.n_diff = None
-                        elif self.n_diff is not None:               
-                            self.n_diff -= times
-                    
-                weight = torch.ones(len(batch.id)).to(self.device)
-                for i in range(len(batch.id)):
-                    if i in appended_num_list:
-                        weight[i] = (1+self.lambda_star)
-                losses = losses * weight
-                loss = torch.mean(losses)
+            #wandb.log({"Training loss": loss})
                 
-                        
-            wandb.log({"Training loss": loss})
-            
-            
             with self.no_sync(not should_step):
                 (loss / self.grad_accumulation_factor).backward()
                 
@@ -203,7 +168,6 @@ class ASR(sb.core.Brain):
         self.on_fit_batch_end(batch, outputs, loss, should_step)
         return loss.detach().cpu()
 
-            
     def on_fit_batch_end(self, batch, outputs, loss, should_step):
         """Called after ``fit_batch()``, meant for calculating and logging metrics.
 
@@ -223,16 +187,15 @@ class ASR(sb.core.Brain):
         # after each step (after accumulated enough gradient and finally updated optimizer)
         if should_step:
             
-            old_lr, new_lr = self.lr_annealing_model(
-                    self.optimizer_step, self.model_optimizer
-                )
-
+            old_lr, new_lr = self.hparams.lr_annealing_model_Noam(
+                    self.model_optimizer
+            )
+            
             sb.nnet.schedulers.update_learning_rate(
                     self.model_optimizer, new_lr
                 )
             
-            wandb.log({"Learning rate": old_lr})
-            
+            #print("lr : ", new_lr)
 
         
     
@@ -240,16 +203,11 @@ class ASR(sb.core.Brain):
         """Computations needed for validation/test batches"""
         predictions = self.compute_forward(batch, stage=stage)
         with torch.no_grad():
-            p_ctc, feats, losses, loss = self.compute_objectives(predictions, batch, stage=stage)
+            loss = self.compute_objectives(predictions, batch, stage=stage)
         return loss.detach()
 
     def on_stage_start(self, stage, epoch):
         """Gets called at the beginning of each epoch"""
-        if epoch >= self.hparams.sample_selection_epoch:
-            self.sample_selection = True
-        else:
-            self.sample_selection = False
-        
         if stage != sb.Stage.TRAIN:
             self.cer_metric = self.hparams.cer_computer()
             self.wer_metric = self.hparams.error_rate_computer()
@@ -260,16 +218,6 @@ class ASR(sb.core.Brain):
         stage_stats = {"loss": stage_loss}
         if stage == sb.Stage.TRAIN:
             self.train_stats = stage_stats
-            
-            # save csv file
-            dir_name, base_name = os.path.split(self.csv_file)
-            without_ext, ext = base_name.split(".")
-            
-            csv_file_ = dir_name + "/" + without_ext + "_EPOCH_" + str(epoch) + "." + ext
-            create_csv(csv_file_, self.reservoir)
-            
-            self.reservoir.reinit()
-            
         else:
             stage_stats["CER"] = self.cer_metric.summarize("error_rate")
             stage_stats["WER"] = self.wer_metric.summarize("error_rate")
@@ -307,27 +255,117 @@ class ASR(sb.core.Brain):
         self.model_optimizer = self.hparams.model_opt_class(
             self.hparams.model.parameters()
         )
+
         if self.checkpointer is not None:
             self.checkpointer.add_recoverable("modelopt", self.model_optimizer)
-            #self.checkpointer.add_recoverable("reservoir", self.reservoir)
             
     def zero_grad(self, set_to_none=False):
         self.model_optimizer.zero_grad(set_to_none)
+          
     
-    
-    
+           
+        
 
 
+# Define custom data procedure
+def dataio_prepare(hparams, tokenizer):
+    """This function prepares the datasets to be used in the brain class.
+    It also defines the data processing pipeline through user-defined functions."""
 
+    # 1. Define datasets
+    data_folder = hparams["data_folder"]
+
+    train_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
+        csv_path=hparams["train_csv"], replacements={"data_root": data_folder},
+    )
+
+    if hparams["sorting"] == "ascending":
+        # we sort training data to speed up training and get better results.
+        train_data = train_data.filtered_sorted(
+            sort_key="duration",
+            key_max_value={"duration": hparams["avoid_if_longer_than"]},
+        )
+        # when sorting do not shuffle in dataloader ! otherwise is pointless
+        hparams["dataloader_options"]["shuffle"] = False
+
+    elif hparams["sorting"] == "descending":
+        train_data = train_data.filtered_sorted(
+            sort_key="duration",
+            reverse=True,
+            key_max_value={"duration": hparams["avoid_if_longer_than"]},
+        )
+        # when sorting do not shuffle in dataloader ! otherwise is pointless
+        hparams["dataloader_options"]["shuffle"] = False
+
+    elif hparams["sorting"] == "random":
+        pass
+
+    else:
+        raise NotImplementedError(
+            "sorting must be random, ascending or descending"
+        )
+
+    valid_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
+        csv_path=hparams["valid_csv"], replacements={"data_root": data_folder},
+    )
+    # We also sort the validation data so it is faster to validate
+    valid_data = valid_data.filtered_sorted(sort_key="duration")
+
+    test_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
+        csv_path=hparams["test_csv"], replacements={"data_root": data_folder},
+    )
+
+    # We also sort the validation data so it is faster to validate
+    test_data = test_data.filtered_sorted(sort_key="duration")
+
+    datasets = [train_data, valid_data, test_data]
+
+    # 2. Define audio pipeline:
+    @sb.utils.data_pipeline.takes("wav")
+    @sb.utils.data_pipeline.provides("sig")
+    def audio_pipeline(wav):
+        info = torchaudio.info(wav)
+        sig = sb.dataio.dataio.read_audio(wav)
+        resampled = torchaudio.transforms.Resample(
+            info.sample_rate, hparams["sample_rate"],
+        )(sig)
+        return resampled
+
+    sb.dataio.dataset.add_dynamic_item(datasets, audio_pipeline)
+
+    # 3. Define text pipeline:
+    @sb.utils.data_pipeline.takes("wrd")
+    @sb.utils.data_pipeline.provides(
+        "tokens_list", "tokens_bos", "tokens_eos", "tokens"
+    )
+    def text_pipeline(wrd):
+        tokens_list = tokenizer.sp.encode_as_ids(wrd)
+        yield tokens_list
+        tokens_bos = torch.LongTensor([hparams["bos_index"]] + (tokens_list))
+        yield tokens_bos
+        tokens_eos = torch.LongTensor(tokens_list + [hparams["eos_index"]])
+        yield tokens_eos
+        tokens = torch.LongTensor(tokens_list)
+        yield tokens
+
+    sb.dataio.dataset.add_dynamic_item(datasets, text_pipeline)
+
+    # 4. Set output:
+    sb.dataio.dataset.set_output_keys(
+        datasets, ["id", "sig", "tokens_bos", "tokens_eos", "tokens"],
+    )
+    return train_data, valid_data, test_data
+    
+    
 
 if __name__ == "__main__":
 
-    wandb.init(project='In-process_Entropy_sample_selection')
+    #wandb.init(project='Train en')
+    #wandb.init(id="hopeful-plasma-1", resume=True)
     
-    #wandb.init(id="usual-armadillo-30", resume=True)
-    wandb.run.save()
+    #wandb.run.name = "First run"
+    #wandb.run.save()
     
-        
     # Load hyperparameters file with command-line overrides
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
     
@@ -343,7 +381,7 @@ if __name__ == "__main__":
         "num_workers": hparams["num_workers"]
     }
     
-    wandb.config.update(args)
+    #wandb.config.update(args)
    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.empty_cache()
@@ -395,41 +433,53 @@ if __name__ == "__main__":
 		eos_piece=hparams["eos_piece"], # <eos>
     )
    
-    # Defining scheduler 
-    lr_annealing_model = MyIntervalScheduler(lr_initial = hparams["peak_lr"],
-                                            n_warmup_steps = hparams["tenth_step"],
-                                            anneal_steps = hparams["half_step"],
-                                            anneal_rates = hparams["anneal_rate"])
     
     
     # Create the datasets objects as well as tokenization and encoding
     train_data, valid_data, test_data = dataio_prepare(hparams, tokenizer)
 
-    checkpointer = hparams["checkpointer"]
-    
     # Trainer initialization
     asr_brain = ASR(
         modules=hparams["modules"],
         hparams=hparams,
         run_opts=run_opts,
-        checkpointer=checkpointer, #hparams["checkpointer"],
+        checkpointer=hparams["checkpointer"],
     )
 
     # Adding objects to trainer.
     asr_brain.tokenizer = tokenizer
     
-    asr_brain.lr_annealing_model = lr_annealing_model
+    
+    #asr_brain.checkpointer.add_recoverable("scheduler_model", asr_brain.lr_annealing_model)
 
+
+    """
+    For Beam-Search Decoding
     
-    asr_brain.reservoir = Reservoir(asr_brain.hparams.reservoir_size, asr_brain.hparams.attribute)
-    asr_brain.n_diff = None
-   
+    # specify alphabet labels as they appear in logits
     
-    asr_brain.csv_file = asr_brain.hparams.selected_sample_csv
-    asr_brain.attribute = asr_brain.hparams.attribute
-    asr_brain.lambda_star = asr_brain.hparams.lambda_star
-    asr_brain.sample_selection = False
+    # The CTC target vocabulary includes 26 English characters, 
+    # a space token (" "), an apostrophe ('), and a special CTC blank symbol (pad).
     
+    #labels = [" ", "<bos>", "<eos>", "<pad>", "<unk>", 
+    #          "E", "N", "I", "T", "A", "R", "S", "O", "H", "D",
+    #          "L", "U", "C", "M", "G", "F", "B", "W", "P", "Y",
+    #          "V", "K", "Z", "J", "X", "'", "Q"]
+
+    # tokenizer의 vocab 순서와 동일하게 하는 것 중요!!
+    
+    #blank_index: 0
+    #bos_index: 1
+    #eos_index: 2
+    #pad_index: 3
+    #unk_index: 4
+    
+    # vocab: 32 개 token : a~z (26개) + space, eos, bos, pad, unk (5개) + " ' " (1개)
+
+    #asr_brain.beam_search_decoder = build_ctcdecoder(labels)            
+
+    """
+        
     
     asr_brain.fit(
         asr_brain.hparams.epoch_counter,

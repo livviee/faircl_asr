@@ -3,9 +3,9 @@
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: !PLACEHOLDER
+seed: 9119
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref /result/hubert_ctc_en_then_de/en/<seed>
+output_folder: !ref /home/CVoice_hubert_ctc/result/hubert_ctc_en/<seed>
 test_wer_file: !ref <output_folder>/wer_test.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -19,16 +19,38 @@ wav2vec2_hub: facebook/hubert-base-ls960
 wav2vec2_folder: !ref <save_folder>/hubert_checkpoint
 
 # Dataset prep parameters
-data_folder: !PLACEHOLDER # /data/cv-corpus-15.0-2023-09-08/de
+data_folder: /data/cv-corpus-15.0-2023-09-08/en
 train_tsv_file: !ref <data_folder>/train.tsv
 dev_tsv_file: !ref <data_folder>/dev.tsv
 test_tsv_file: !ref <data_folder>/test.tsv
 accented_letters: False # will strip accent
 language: en ####################################
+coreset_csv: !ref <save_folder>/coreset.csv # randomly selected 50 samples in each group
 train_csv: !ref <save_folder>/train.csv
 valid_csv: !ref <save_folder>/dev.csv
 test_csv: !ref <save_folder>/test.csv
-skip_prep: False
+train_csv2: !ref <save_folder>/train2.csv # coreset_candidate
+
+selected_sample_csv: !ref <save_folder>/selected_sample.csv ##############################################################
+skip_prep: True ###################################
+
+
+# Hparam for Info-theory sample selection
+# learnability of measure M hparam
+#alpha: 0.3
+#beta: 0.3
+#lambda_: 1.5
+
+k: 30
+final_k: 10000
+tau: 0.8 # coreset affinity
+tau_star: 1.5 # when selecting real coreset samples
+lambda_star: 0.125 # model update weight for selected samples
+duration_coef: 0.3
+
+reservoir_size: 100
+attribute: age
+sample_selection_epoch: 1
 
 
 # We remove utterance slonger than 10s in the train/dev/test sets as
@@ -36,22 +58,24 @@ skip_prep: False
 avoid_if_longer_than: 10.0
 
 # Training parameters
-number_of_epochs: 60 #50
+number_of_epochs: 50
 initial_lr: 0
 peak_lr: 0.00003
 decayed_lr: 0.0000015
 sorting: descending
 auto_mix_prec: False
 sample_rate: 16000
-ckpt_interval_minutes: 1 # save checkpoint every N min
+ckpt_interval_minutes: 10 # save checkpoint every N min
 
 # With data_parallel batch_size is split into N jobs
 # With DDP batch_size is multiplied by N jobs
 ## Must be 6 per GPU to fit 16GB of VRAM
 # Must be 8 per GPU to fit 32GB of VRAM
-batch_size: 32
-test_batch_size: 32
-num_workers: 4 # 2 is better if the server is busy
+core_batch_size: 2
+core_batch_size2: 12
+batch_size: 64
+test_batch_size: 64
+num_workers: 2 # 2 is better if the server is busy
 dataloader_num_workers: !ref <num_workers>
 test_num_workers: !ref <num_workers>
 pin_memory: True
@@ -62,6 +86,18 @@ dataloader_options:
   num_workers: !ref <dataloader_num_workers>
   pin_memory: !ref <pin_memory>
   shuffle: True
+coresetloader_options:
+  batch_size: !ref <core_batch_size>
+  num_workers: !ref <dataloader_num_workers>
+  pin_memory: !ref <pin_memory>
+  shuffle: True
+  looped_nominal_epoch: !ref <total_step>
+coresetloader_options2:
+  batch_size: !ref <core_batch_size2>
+  num_workers: !ref <dataloader_num_workers>
+  pin_memory: !ref <pin_memory>
+  shuffle: True
+  looped_nominal_epoch: !ref <total_step>
 test_dataloader_options:
   batch_size: !ref <test_batch_size>
   num_workers: !ref <test_num_workers>
@@ -80,15 +116,14 @@ freeze_wav2vec: False # update transformer
 freeze_feature_extractor: True # freeze feature extractor
 dropout: 0.15
 
-total_step: 414725  # 33178 * 50 epoch / 4 grad_accumulation
-tenth_step: 41472   # scheduler warmup steps
-half_step: 207362
-eighth_step: 51840
+total_step: 207275  # 16582 * 50 epoch / 4 grad_accumulation
+tenth_step: 20727   # scheduler warmup steps
+half_step: 103637
+eighth_step: 25909
 warmup_steps: !ref <half_step> # do not update optimizer
 freeze_steps: !ref <eighth_step> # only update linear layer
-n_warmup_steps : 8294 # for Noam scheduler    33178 * 1 epoch / 4 grad_accumulation
 
-anneal_rate: 0.99998555323
+anneal_rate: 0.9999710944
 
 tenth_epoch: 5
 half_epoch: 25
@@ -155,8 +190,13 @@ ctc_lin: !new:speechbrain.nnet.linear.Linear
 log_softmax: !new:speechbrain.nnet.activations.Softmax
   apply_log: True
 
+softmax: !new:speechbrain.nnet.activations.Softmax
+  apply_log: False
+
 ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
   blank_index: !ref <blank_index>
+  reduction: batch
+
 
 modules:
   wav2vec2: !ref <wav2vec2>
@@ -172,6 +212,9 @@ model_opt_class: !name:torch.optim.Adam
 
 #lr_annealing_model: !ref <lr_annealing_model_1>
 
+#reservoir: !new:info_theory_sample_selection_DP_ver.Reservoir
+#  size: !ref <reservoir_size>
+#  attribute: !ref <attribute>
 
 lr_annealing_model_1: !new:mySchedulers.MyIntervalScheduler
   lr_initial: !ref <peak_lr>
@@ -185,9 +228,9 @@ lr_annealing_model_0: !new:speechbrain.nnet.schedulers.IntervalScheduler
               {"steps": !ref <half_step>, "lr": !ref <peak_lr>},
               {"steps": !ref <total_step>, "lr": !ref <decayed_lr>}]
 
-lr_annealing_model_Noam: !new:speechbrain.nnet.schedulers.NoamScheduler
-  lr_initial: !ref <decayed_lr>
-  n_warmup_steps: !ref <n_warmup_steps>
+lr_annealing_model_2: !new:speechbrain.nnet.schedulers.NoamScheduler
+  lr_initial: !ref <peak_lr>
+  n_warmup_steps: !ref <warmup_steps>
   model_size: !ref <dnn_neurons>
 
 lr_annealing_model_3: !new:speechbrain.nnet.schedulers.CyclicCosineScheduler
