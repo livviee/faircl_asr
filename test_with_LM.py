@@ -1,6 +1,32 @@
 #!/usr/bin/env python3
 """
-Train Extra epochs
+Run below commands to use LM:
+these needs to be saved in the 'seed/save' folder.
+
+
+import gzip
+import os, shutil, wget
+
+lm_gzip_path = '3-gram.pruned.1e-7.arpa.gz'
+if not os.path.exists(lm_gzip_path):
+    print('Downloading pruned 3-gram model.')
+    lm_url = 'http://www.openslr.org/resources/11/3-gram.pruned.1e-7.arpa.gz'
+    lm_gzip_path = wget.download(lm_url)
+    print('Downloaded the 3-gram language model.')
+else:
+    print('Pruned .arpa.gz already exists.')
+
+uppercase_lm_path = '3-gram.pruned.1e-7.arpa'
+if not os.path.exists(uppercase_lm_path):
+    with gzip.open(lm_gzip_path, 'rb') as f_zipped:
+        with open(uppercase_lm_path, 'wb') as f_unzipped:
+            shutil.copyfileobj(f_zipped, f_unzipped)
+    print('Unzipped the 3-gram language model.')
+else:
+    print('Unzipped .arpa already exists.')
+
+!wget http://www.openslr.org/resources/11/librispeech-vocab.txt
+
 """
 
 import sys
