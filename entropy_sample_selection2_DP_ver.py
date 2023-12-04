@@ -524,6 +524,7 @@ def random_subset_of_dict(dictionary, n_size):
     return new_dict
     
 
+
 def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
     
     majority_group_dict = reservoir.group_dict[reservoir.majority_group]
@@ -596,9 +597,13 @@ def find_min_dist_sample_in_majority_group(reservoir, n_diff, asr):
 
     prob_list_ = list()
     
-    random_choices = list(WeightedRandomSampler(weights=prob_list,
-                                                num_samples=n_diff,
-                                                replacement=False))
+
+    try:
+        random_choices = list(WeightedRandomSampler(weights=prob_list,
+                                                    num_samples=n_diff,
+                                                    replacement=False))
+    except:
+        random_choices = np.random.choice(len(prob_list), n_diff, replace=False)
 
     selected_id = list()
     selected_object = list()
@@ -713,12 +718,18 @@ def find_min_dist_sample_in_majority_group2(reservoir, n_diff, asr):
 
     prob_list_ = list()
     
-    random_choices = list(WeightedRandomSampler(weights=prob_list,
-                                                num_samples=n_diff,
-                                                replacement=False))
+    try:
+        random_choices = list(WeightedRandomSampler(weights=prob_list,
+                                                    num_samples=n_diff,
+                                                    replacement=False))
+    except:
+        random_choices = np.random.choice(len(prob_list), n_diff, replace=False)
 
     selected_id = list()
     selected_object = list()
+    
+    if len(random_choices) == 0:
+        return None, None
     
     for i in random_choices:
         selected_id.append(id_list[i])
