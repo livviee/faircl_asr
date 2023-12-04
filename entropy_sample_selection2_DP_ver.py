@@ -864,6 +864,10 @@ def entropy_based_data_selection(asr, size, attribute, train_loader, csv_file):
     
 
 def wandb_log(reservoir):
+    #wandb.log({"female" : reservoir.count_k_i["male"]})
+    #wandb.log({"male" : reservoir.count_k_i["female"]})
+    #wandb.log({"other" : reservoir.count_k_i["other"]})
+	
     wandb.log({"teens" : reservoir.count_k_i["teens"]})
     wandb.log({"twenties" : reservoir.count_k_i["twenties"]})
     wandb.log({"thrities" : reservoir.count_k_i["thirties"]})
@@ -974,7 +978,7 @@ if __name__ == "__main__":
                                              **hparams["dataloader_options"])
     
     size = 10000
-    attribute = "age"
+    attribute = hparams["attribute"]
     csv_file = hparams["selected_sample_csv"]
     
     
