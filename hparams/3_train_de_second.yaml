@@ -36,7 +36,7 @@ skip_prep: False
 avoid_if_longer_than: 10.0
 
 # Training parameters
-number_of_epochs: 50
+number_of_epochs: 100
 initial_lr: 0
 peak_lr: 0.00003
 decayed_lr: 0.0000015
