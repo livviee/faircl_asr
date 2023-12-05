@@ -18,9 +18,6 @@ from mySchedulers import MyIntervalScheduler
 
 logger = logging.getLogger(__name__)
 
-
-# Define training procedure
-
 class ASR(sb.core.Brain):
     def compute_forward(self, batch, stage):
         """Forward computations from the waveform batches to the output probabilities."""
@@ -193,7 +190,7 @@ class ASR(sb.core.Brain):
                     self.model_optimizer, new_lr
                 )
             
-            #wandb.log({"Learning rate": old_lr})
+            wandb.log({"Learning rate": old_lr})
             
             #self.hparams.train_logger.log_stats(
             #    stats_meta={
@@ -211,6 +208,12 @@ class ASR(sb.core.Brain):
 
     def on_stage_start(self, stage, epoch):
         """Gets called at the beginning of each epoch"""
+
+        #self.epoch = epoch
+        if epoch == 51:
+            self.optimizer_step = 0
+            self.model_optimizer.param_groups[0]["lr"] = 0.0 
+            
         if stage == sb.Stage.TEST:
             self.cer_metric = self.hparams.cer_computer()
             self.wer_metric = self.hparams.error_rate_computer()
@@ -261,6 +264,8 @@ class ASR(sb.core.Brain):
 
         if self.checkpointer is not None:
             self.checkpointer.add_recoverable("modelopt", self.model_optimizer)
+            
+        #self.model_optimizer.lr = 0.0        
             
     def zero_grad(self, set_to_none=False):
         self.model_optimizer.zero_grad(set_to_none)
@@ -363,7 +368,7 @@ def dataio_prepare(hparams, tokenizer):
 
 if __name__ == "__main__":
 
-    #wandb.init(project='YOUR PROJECT NAME') # resume=True
+    wandb.init(project='Resume Training') # resume=True
     
     #wandb.run.name = "YOUR RUN NAME"
     #wandb.run.save()
@@ -383,7 +388,7 @@ if __name__ == "__main__":
         "num_workers": hparams["num_workers"]
     }
     
-    #wandb.config.update(args)
+    wandb.config.update(args)
    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.empty_cache()
@@ -487,7 +492,6 @@ if __name__ == "__main__":
     #asr_brain.beam_search_decoder = build_ctcdecoder(labels)            
 
     """
-        
     
     asr_brain.fit(
         asr_brain.hparams.epoch_counter,
@@ -504,6 +508,5 @@ if __name__ == "__main__":
         min_key="WER",
         test_loader_kwargs=hparams["test_dataloader_options"],
     )
-    
     
     
