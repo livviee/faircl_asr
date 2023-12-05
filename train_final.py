@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import sys
 import torch
 import logging
@@ -54,7 +53,7 @@ class ASR(sb.core.Brain):
 
         loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
 
-        if stage != sb.Stage.TRAIN:
+        if stage == sb.Stage.TEST:
             # Decode token terms to words
 
             sequence = sb.decoders.ctc_greedy_decode(
@@ -212,7 +211,7 @@ class ASR(sb.core.Brain):
 
     def on_stage_start(self, stage, epoch):
         """Gets called at the beginning of each epoch"""
-        if stage != sb.Stage.TRAIN:
+        if stage == sb.Stage.TEST:
             self.cer_metric = self.hparams.cer_computer()
             self.wer_metric = self.hparams.error_rate_computer()
     
@@ -222,7 +221,7 @@ class ASR(sb.core.Brain):
         stage_stats = {"loss": stage_loss}
         if stage == sb.Stage.TRAIN:
             self.train_stats = stage_stats
-        else:
+        elif stage == sb.Stage.TEST:
             stage_stats["CER"] = self.cer_metric.summarize("error_rate")
             stage_stats["WER"] = self.wer_metric.summarize("error_rate")
 
@@ -236,9 +235,9 @@ class ASR(sb.core.Brain):
                 train_stats=self.train_stats,
                 valid_stats=stage_stats,
             )
-            self.checkpointer.save_and_keep_only(
-                meta={"WER": stage_stats["WER"]}, min_keys=["WER"],
-            )
+            #self.checkpointer.save_and_keep_only(
+            #    meta={"WER": stage_stats["WER"]}, min_keys=["WER"],
+            #)
             
             ckpt_name = "_END OF EPOCH_" + str(epoch)
             self.checkpointer.save_checkpoint(name = ckpt_name)
@@ -506,6 +505,5 @@ if __name__ == "__main__":
         test_loader_kwargs=hparams["test_dataloader_options"],
     )
     
-
     
     
