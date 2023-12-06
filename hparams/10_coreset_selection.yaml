@@ -116,14 +116,26 @@ freeze_wav2vec: False # update transformer
 freeze_feature_extractor: True # freeze feature extractor
 dropout: 0.15
 
-total_step: 207275  # 16582 * 50 epoch / 4 grad_accumulation
-tenth_step: 20727   # scheduler warmup steps
-half_step: 103637
-eighth_step: 25909
+#====================Training From EPOC 45========================
+total_step: 393979 # 373252 + 20727
+tenth_step: 41472   # scheduler warmup steps
+half_step: 207362
+eighth_step: 51840
 warmup_steps: !ref <half_step> # do not update optimizer
 freeze_steps: !ref <eighth_step> # only update linear layer
+warmup_steps2 : !ref <half_step>
 
-anneal_rate: 0.9999710944
+anneal_rate: 0.99997109431
+#====================Training From EPOC 1=========================
+#total_step: 207275  # 16582 * 50 epoch / 4 grad_accumulation
+#tenth_step: 20727   # scheduler warmup steps
+#half_step: 103637
+#eighth_step: 25909
+#warmup_steps: !ref <half_step> # do not update optimizer
+#freeze_steps: !ref <eighth_step> # only update linear layer
+
+#anneal_rate: 0.9999710944
+#==================================================================
 
 tenth_epoch: 5
 half_epoch: 25
