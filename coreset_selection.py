@@ -347,7 +347,11 @@ def calculate_duration_score(batch, asr):
 
 def select_top_k(measure_M, k, batch):
 
-    values, ids = measure_M.topk(k)
+    if len(measure_M) < k:
+        ids = list(range(len(measure_M)))
+    else:
+        values, ids = measure_M.topk(k)
+
     top_k_ids = list()
     
     for i in ids:
