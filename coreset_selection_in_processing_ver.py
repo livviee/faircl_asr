@@ -60,9 +60,9 @@ class ASR(sb.core.Brain):
         if stage != sb.Stage.TRAIN:
             # Decode token terms to words
 
-            sequence = sb.decoders.ctc_greedy_decode(
-                p_ctc, wav_lens, blank_id=-1
-            )
+            #sequence = sb.decoders.ctc_greedy_decode(
+            #    p_ctc, wav_lens, blank_id=-1
+            #)
             
             """
             # Beam Search Decoding
@@ -74,26 +74,26 @@ class ASR(sb.core.Brain):
 
             """
             
-            predicted_words = self.tokenizer(sequence, task="decode_from_list")
+            #predicted_words = self.tokenizer(sequence, task="decode_from_list")
 
             
             # Convert indices to words
-            target_words = undo_padding(tokens, tokens_lens)
-            target_words = self.tokenizer(target_words, task="decode_from_list")
+            #target_words = undo_padding(tokens, tokens_lens)
+            #target_words = self.tokenizer(target_words, task="decode_from_list")
             
             
             
             # Print at Validation stage
             
-            print("target / greedy predicted words:\n")
-            for i in range(2):
-                print(target_words[i])
-                print(predicted_words[i])
-                print("\n\n")
+            #print("target / greedy predicted words:\n")
+            #for i in range(2):
+             #   print(target_words[i])
+             #   print(predicted_words[i])
+             #   print("\n\n")
             
 
-            self.wer_metric.append(ids, predicted_words, target_words)
-            self.cer_metric.append(ids, predicted_words, target_words)
+            #self.wer_metric.append(ids, predicted_words, target_words)
+            #self.cer_metric.append(ids, predicted_words, target_words)
 
         return p_ctc, feats, losses, loss
     
